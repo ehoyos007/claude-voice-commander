@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "instanceId": "placeholder"
+  },
+  "name": "04 - Notification Fallback",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notification-fallback",
+        "responseMode": "responseNode"
+      },
+      "name": "Fallback Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [100, 300],
+      "webhookId": "placeholder",
+      "notes": "Triggered when call attempts fail"
+    },
+    {
+      "parameters": {},
+      "name": "TODO: Implement Workflow",
+      "type": "n8n-nodes-base.noOp",
+      "position": [300, 300],
+      "notes": "This is a placeholder. Implement the full workflow with:\n1. Send Slack DM notification\n2. Send email via Resend\n3. Log notification in Supabase\n4. Handle delivery failures"
+    }
+  ],
+  "connections": {
+    "Fallback Webhook": {
+      "main": [
+        [
+          {
+            "node": "TODO: Implement Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": ["claude-voice-commander", "notifications"]
+}

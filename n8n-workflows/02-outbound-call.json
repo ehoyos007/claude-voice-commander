@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "instanceId": "placeholder"
+  },
+  "name": "02 - Outbound Call Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pi-events",
+        "responseMode": "responseNode"
+      },
+      "name": "Pi Events Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [100, 300],
+      "webhookId": "placeholder",
+      "notes": "Receives events from Pi service (attention.batch_ready, system.boot, etc.)"
+    },
+    {
+      "parameters": {},
+      "name": "TODO: Implement Workflow",
+      "type": "n8n-nodes-base.noOp",
+      "position": [300, 300],
+      "notes": "This is a placeholder. Implement the full workflow with:\n1. Event type router\n2. Telnyx Call Control - initiate outbound call\n3. Answering Machine Detection handling\n4. Human path: iterate attention items, ElevenLabs TTS, gather responses\n5. Machine path: leave voicemail, send SMS, schedule retry\n6. Response clarity verification with Claude API\n7. Route responses back to Pi API\n8. Trigger notification fallback workflow on failure"
+    }
+  ],
+  "connections": {
+    "Pi Events Webhook": {
+      "main": [
+        [
+          {
+            "node": "TODO: Implement Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": ["claude-voice-commander", "outbound"]
+}

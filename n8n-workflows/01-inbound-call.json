@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "instanceId": "placeholder"
+  },
+  "name": "01 - Inbound Call Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telnyx-voice",
+        "responseMode": "responseNode"
+      },
+      "name": "Telnyx Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [100, 300],
+      "webhookId": "placeholder",
+      "notes": "Receives all Telnyx voice events"
+    },
+    {
+      "parameters": {},
+      "name": "TODO: Implement Workflow",
+      "type": "n8n-nodes-base.noOp",
+      "position": [300, 300],
+      "notes": "This is a placeholder. Implement the full workflow with:\n1. Event type router (call.initiated, call.answered, call.gather.ended, etc.)\n2. Caller ID verification\n3. Telnyx Call Control actions (answer, record, gather, playback)\n4. ElevenLabs TTS integration\n5. Claude API intent classification\n6. Pi API calls\n7. Response handling"
+    }
+  ],
+  "connections": {
+    "Telnyx Voice Webhook": {
+      "main": [
+        [
+          {
+            "node": "TODO: Implement Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": ["claude-voice-commander", "inbound"]
+}

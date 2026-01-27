@@ -1,0 +1,25 @@
+{
+  "name": "claude-voice-commander",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Voice-controlled system for managing Claude Code sessions on Raspberry Pi",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:pi": "npm run dev --workspace=@claude-voice-commander/pi-service",
+    "dev:dashboard": "npm run dev --workspace=@claude-voice-commander/dashboard",
+    "build": "npm run build --workspaces",
+    "build:pi": "npm run build --workspace=@claude-voice-commander/pi-service",
+    "build:dashboard": "npm run build --workspace=@claude-voice-commander/dashboard",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "clean": "rm -rf packages/*/dist packages/*/.next packages/*/node_modules node_modules"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

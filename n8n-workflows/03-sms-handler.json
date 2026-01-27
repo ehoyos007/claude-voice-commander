@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "instanceId": "placeholder"
+  },
+  "name": "03 - SMS Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telnyx-sms",
+        "responseMode": "responseNode"
+      },
+      "name": "Telnyx SMS Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [100, 300],
+      "webhookId": "placeholder",
+      "notes": "Receives inbound SMS from Telnyx"
+    },
+    {
+      "parameters": {},
+      "name": "TODO: Implement Workflow",
+      "type": "n8n-nodes-base.noOp",
+      "position": [300, 300],
+      "notes": "This is a placeholder. Implement the full workflow with:\n1. Parse incoming SMS\n2. Match to pending attention items\n3. Route response to Pi API\n4. Send confirmation SMS\n5. Update attention item as resolved"
+    }
+  ],
+  "connections": {
+    "Telnyx SMS Webhook": {
+      "main": [
+        [
+          {
+            "node": "TODO: Implement Workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all"
+  },
+  "tags": ["claude-voice-commander", "sms"]
+}
