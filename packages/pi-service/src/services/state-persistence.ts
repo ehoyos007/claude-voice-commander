@@ -7,6 +7,7 @@ import type {
   SystemBootPayload,
 } from '@claude-voice-commander/shared';
 import { getConfig } from '../lib/config';
+import { getSupabase } from '../lib/supabase';
 import { sessionManager } from './session-manager';
 import { attentionQueue } from './attention-queue';
 
@@ -68,11 +69,82 @@ let piBootTime = new Date();
 async function ensureStateDir(): Promise<void> {
   const config = getConfig();
   const stateDir = config.stateFile.replace(/\/[^/]+$/, '');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(stateDir, { recursive: true });
+}
 
-  try {
-    await Bun.write(stateDir + '/.keep', '');
-  } catch {
-    // Directory might already exist
+/**
+ * Convert camelCase Session to snake_case DB row
+ */
+function sessionToRow(s: Session) {
+  return {
+    id: s.id,
+    name: s.name,
+    tmux_session: s.tmuxSession,
+    project_path: s.projectPath ?? null,
+    description: s.description ?? null,
+    initial_prompt: s.initialPrompt ?? null,
+    status: s.status,
+    created_at: s.createdAt,
+    updated_at: s.updatedAt,
+    last_activity_at: s.lastActivityAt ?? null,
+    last_output_preview: s.lastOutputPreview ?? null,
+    error_count: s.errorCount,
+    is_preserved: s.isPreserved,
+    metadata: s.metadata,
+  };
+}
+
+/**
+ * Sync sessions to Supabase (best-effort, non-blocking)
+ */
+async function syncSessionsToSupabase(sessions: Session[]): Promise<void> {
+  const sb = getSupabase();
+  if (sessions.length === 0) return;
+
+  const rows = sessions.map(sessionToRow);
+  const { error } = await sb.from('sessions').upsert(rows, { onConflict: 'id' });
+  if (error) {
+    console.error('Supabase session sync error:', error.message);
+  }
+}
+
+/**
+ * Sync a decision to Supabase
+ */
+async function syncDecisionToSupabase(d: Decision): Promise<void> {
+  const sb = getSupabase();
+  const { error } = await sb.from('decisions').upsert({
+    id: d.id,
+    session_id: d.sessionId,
+    question: d.question,
+    answer: d.answer,
+    context: d.context ?? null,
+    created_at: d.createdAt,
+  });
+  if (error) {
+    console.error('Supabase decision sync error:', error.message);
+  }
+}
+
+/**
+ * Log an audit event to Supabase
+ */
+async function logAudit(
+  eventType: string,
+  actor: string,
+  description: string,
+  details: Record<string, unknown> = {}
+): Promise<void> {
+  const sb = getSupabase();
+  const { error } = await sb.from('audit_logs').insert({
+    event_type: eventType,
+    actor,
+    description,
+    details,
+  });
+  if (error) {
+    console.error('Supabase audit log error:', error.message);
   }
 }
 
@@ -100,7 +172,8 @@ export const statePersistence: IStatePersistence = {
 
     await Bun.write(config.stateFile, JSON.stringify(state, null, 2));
 
-    // TODO: Also sync to Supabase
+    // Sync sessions to Supabase (best-effort)
+    syncSessionsToSupabase(sessions).catch(() => {});
   },
 
   async loadState(): Promise<PersistedState | null> {
@@ -115,8 +188,6 @@ export const statePersistence: IStatePersistence = {
       const content = await file.text();
       const state = JSON.parse(content) as PersistedState;
 
-      // TODO: Handle version migrations if needed
-
       return state;
     } catch (error) {
       console.error('Error loading state:', error);
@@ -125,12 +196,12 @@ export const statePersistence: IStatePersistence = {
   },
 
   async restoreState(): Promise<void> {
-    const config = getConfig();
     piBootTime = new Date();
 
     const state = await this.loadState();
     if (!state) {
       console.log('No previous state found, starting fresh');
+      logAudit('system.boot', 'system', 'Pi booted (fresh start)').catch(() => {});
       return;
     }
 
@@ -161,10 +232,17 @@ export const statePersistence: IStatePersistence = {
       }
     }
 
-    // TODO: Restore sessions to session manager
+    // Sync preserved sessions to Supabase
+    const sessionsToSync = Object.values(state.sessions).filter(
+      (s) => s.status !== 'killed'
+    );
+    syncSessionsToSupabase(sessionsToSync).catch(() => {});
 
-    // Restore attention queue items (but don't restart timer)
-    // User needs to explicitly trigger or wait for new items
+    // Log boot event
+    logAudit('system.boot', 'system', `Pi rebooted, ${preservedSessions.length} sessions preserved`, {
+      previousSync: state.lastSync,
+      preservedSessions: preservedSessions.map((s) => s.name),
+    }).catch(() => {});
 
     // Send boot notification
     const bootPayload: SystemBootPayload = {
@@ -177,7 +255,7 @@ export const statePersistence: IStatePersistence = {
       })),
     };
 
-    // TODO: Send webhook notification
+    // TODO: Send webhook notification to n8n
     console.log('Would send boot notification:', bootPayload);
 
     console.log(
@@ -209,7 +287,8 @@ export const statePersistence: IStatePersistence = {
     // Save state after recording
     await this.saveState();
 
-    // TODO: Sync to Supabase
+    // Sync to Supabase
+    syncDecisionToSupabase(newDecision).catch(() => {});
   },
 
   async getDecisions(sessionId: string): Promise<Decision[]> {

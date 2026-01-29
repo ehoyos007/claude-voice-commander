@@ -7,8 +7,8 @@
 - [x] Create shared types package
 - [x] Create Pi service scaffold
 - [x] Create Supabase schema
-- [ ] Create Supabase project
-- [ ] Deploy schema to Supabase
+- [x] Create Supabase project
+- [x] Deploy schema to Supabase
 - [ ] Set up Tailscale Funnel on Pi
 
 ### Pi Service Implementation
@@ -19,8 +19,8 @@
 - [x] config.ts validation
 - [x] Implement session-manager.ts (create tmux sessions with Claude)
 - [x] Implement output-monitor.ts (polling loop + pattern detection)
-- [ ] Implement state-persistence.ts (local JSON)
-- [ ] Connect to Supabase
+- [x] Implement state-persistence.ts (local JSON + Supabase sync)
+- [x] Connect to Supabase (sessions, decisions, audit logs)
 
 ### n8n Workflows
 - [ ] Build 01-inbound-call workflow
@@ -53,8 +53,8 @@
 
 ## Phase 3: Persistence & Notifications
 
-- [ ] Local state persistence
-- [ ] Reboot detection
+- [x] Local state persistence
+- [x] Reboot detection
 - [ ] Slack notifications
 - [ ] Resend email integration
 - [ ] DND mode
