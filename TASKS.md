@@ -23,10 +23,11 @@
 - [x] Connect to Supabase (sessions, decisions, audit logs)
 
 ### n8n Workflows
-- [ ] Build 01-inbound-call workflow
-- [ ] Configure Telnyx credentials
+- [x] Build 01-inbound-call workflow (30 nodes, full conversation loop)
+- [ ] Configure Telnyx credentials (need account + phone number)
 - [ ] Configure ElevenLabs credentials
 - [ ] Configure Claude API for intent classification
+- [ ] Set up n8n instance
 - [ ] Test inbound call flow
 
 ### Testing
