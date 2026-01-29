@@ -91,24 +91,59 @@ e274d16 - init: scaffold Claude Voice Commander monorepo project
 
 ---
 
-## Next Session: Continue Phase 1
+## Session: January 29, 2026 (Evening)
+
+### What We Did
+1. **Wired state-persistence into app lifecycle** — restoreState on boot, auto-save every 30s, saveState on shutdown
+2. **Created Supabase project** — `claude-voice-commander` (msqhstkdltiabqntjyqh) in us-east-1
+3. **Deployed full schema** — 9 tables, indexes, triggers, Realtime enabled on 4 tables
+4. **Connected Pi service to Supabase** — Best-effort sync for sessions, decisions, audit logs
+5. **Tested Supabase connection** — Boot audit log + session sync verified end-to-end
+6. **Created `tts-audio` Supabase Storage bucket** — Public bucket for ElevenLabs mp3 files
+7. **Built 01-inbound-call.json** — Complete 30-node n8n workflow with full conversation loop
+
+### Key Decisions
+| Topic | Decision |
+|-------|----------|
+| TTS | ElevenLabs (not Telnyx built-in) |
+| STT | Telnyx built-in gather |
+| Audio hosting | Supabase Storage public bucket |
+| Call state | Telnyx client_state (base64 JSON) |
+| Intent model | Claude 3.5 Haiku |
+| Supabase sync | Best-effort, fire-and-forget (won't block local ops) |
+
+### Files Modified
+- `packages/pi-service/src/index.ts` — State persistence lifecycle
+- `packages/pi-service/src/services/state-persistence.ts` — Supabase sync, mkdir fix
+- `packages/pi-service/.env` — Real Supabase credentials
+- `n8n-workflows/01-inbound-call.json` — Full workflow (933 lines)
+- `TASKS.md` — Updated progress
+
+### Commits
+```
+d880730 - feat: wire state persistence and connect Supabase
+a62629a - feat: build inbound call n8n workflow with full conversation loop
+```
+
+---
+
+## Next Session
 
 ### Immediate Next Steps
-1. Implement `state-persistence.ts` (local JSON, reboot survival)
-2. Create Supabase project and deploy schema
-3. Connect Pi service to Supabase
+1. Set up n8n instance (self-hosted or cloud)
+2. Import workflow, configure credentials (Telnyx, ElevenLabs, Anthropic)
+3. Set up Telnyx account + phone number + Call Control connection
 4. Set up Tailscale Funnel on Pi
+5. Test inbound call flow end-to-end
 
 ### Phase 1 Remaining Work
-- [ ] state-persistence.ts
-- [ ] Supabase project + schema deploy
-- [ ] Supabase connection in Pi service
-- [ ] Tailscale Funnel setup on Pi
-- [ ] First n8n workflow (inbound calls)
-- [ ] Telnyx Call Control integration
-- [ ] ElevenLabs TTS integration
-- [ ] Claude API intent classification
-- [ ] End-to-end test: call in → create session
+- [ ] Set up n8n instance
+- [ ] Configure Telnyx account + credentials
+- [ ] Configure ElevenLabs credentials
+- [ ] Configure Anthropic API key in n8n
+- [ ] Set up Tailscale Funnel on Pi
+- [ ] Test inbound call flow
+- [ ] End-to-end: call in → create session
 
 ### Commands to Resume
 ```bash
@@ -118,6 +153,7 @@ npm run dev:pi
 
 ### Reference Files
 - Plan: `.claude/plans/validated-inventing-iverson.md`
+- Workflow plan: `.claude/plans/melodic-swimming-wren.md`
 - Voice prompts: `docs/VOICE-PROMPTS.md`
 - Detection patterns: `docs/PATTERNS.md`
 - Pi setup: `docs/SETUP-PI.md`
