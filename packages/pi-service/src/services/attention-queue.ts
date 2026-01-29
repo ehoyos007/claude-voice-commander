@@ -4,8 +4,6 @@ import type {
   AttentionPriority,
   AttentionQueueState,
   AttentionBatchReadyPayload,
-  ATTENTION_WINDOWS_MS,
-  MAX_ATTENTION_WINDOW_MS,
 } from '@claude-voice-commander/shared';
 import { getConfig } from '../lib/config';
 
@@ -148,6 +146,7 @@ export const attentionQueue: IAttentionQueue = {
     };
 
     state.items.push(newItem);
+    console.log(`Attention: ${item.type} (p${item.priority}) in ${item.sessionName}: ${item.content.slice(0, 80)}`);
 
     // If this is the first item, start the timer
     if (!state.firstItemAt) {

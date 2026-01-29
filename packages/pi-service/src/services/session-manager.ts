@@ -5,6 +5,8 @@ import type {
 } from '@claude-voice-commander/shared';
 import * as tmux from '../lib/tmux';
 import { getConfig } from '../lib/config';
+import { mkdir } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
 
 /**
  * Session Manager Service
@@ -13,73 +15,70 @@ import { getConfig } from '../lib/config';
  * Handles creation, lifecycle, and message passing.
  */
 export interface ISessionManager {
-  /** Get all active sessions */
   getSessions(): Promise<Session[]>;
-
-  /** Get a specific session by ID or name */
   getSession(idOrName: string): Promise<Session | null>;
-
-  /** Create a new session */
   createSession(request: CreateSessionRequest): Promise<Session>;
-
-  /** Send a message to a session */
   sendMessage(sessionId: string, message: string): Promise<void>;
-
-  /** Stop a session (Ctrl+C) */
   stopSession(sessionId: string): Promise<void>;
-
-  /** Kill a session completely */
   killSession(sessionId: string): Promise<void>;
-
-  /** Resume a session (/resume command) */
   resumeSession(sessionId: string): Promise<void>;
-
-  /** Get recent output from a session */
   getSessionOutput(sessionId: string, lines?: number): Promise<string>;
-
-  /** Update session status */
   updateSessionStatus(sessionId: string, status: SessionStatus): Promise<void>;
+  reconcile(): Promise<void>;
 }
 
-/**
- * In-memory session store (will be synced to Supabase and local state)
- */
+/** In-memory session store */
 const sessions = new Map<string, Session>();
 
-/**
- * Session Manager Implementation
- */
+/** Resolve a session by ID or name, throwing if not found */
+async function resolveSession(idOrName: string): Promise<Session> {
+  const session = sessions.get(idOrName)
+    ?? Array.from(sessions.values()).find((s) => s.name === idOrName);
+  if (!session) {
+    throw new Error(`Session '${idOrName}' not found`);
+  }
+  return session;
+}
+
+/** Build the Claude Code launch command */
+function buildClaudeCommand(config: ReturnType<typeof getConfig>, request: CreateSessionRequest): string {
+  const parts = [config.claudePath, '--dangerously-skip-permissions'];
+  if (request.initialPrompt) {
+    // Pass initial prompt via -p flag so Claude starts working immediately
+    parts.push('-p', `"${request.initialPrompt.replace(/"/g, '\\"')}"`);
+  }
+  return parts.join(' ');
+}
+
+/** Ensure the archive log directory exists and return the log path */
+async function ensureArchiveLogPath(sessionName: string): Promise<string> {
+  const home = process.env.HOME || process.env.USERPROFILE || '/tmp';
+  const archiveDir = join(home, '.claude-commander', 'archives');
+  await mkdir(archiveDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return join(archiveDir, `${sessionName}-${timestamp}.log`);
+}
+
 export const sessionManager: ISessionManager = {
   async getSessions(): Promise<Session[]> {
-    // TODO: Implement - return sessions from local state
-    // Should also reconcile with actual tmux sessions
     return Array.from(sessions.values());
   },
 
   async getSession(idOrName: string): Promise<Session | null> {
-    // TODO: Implement - find by ID or name
-    // Check local state first, then tmux
-    const session = sessions.get(idOrName);
-    if (session) return session;
-
-    // Try to find by name
-    for (const s of sessions.values()) {
-      if (s.name === idOrName) return s;
-    }
-
-    return null;
+    return sessions.get(idOrName)
+      ?? Array.from(sessions.values()).find((s) => s.name === idOrName)
+      ?? null;
   },
 
   async createSession(request: CreateSessionRequest): Promise<Session> {
     const config = getConfig();
 
-    // Check max sessions limit
+    // Enforce limits
     const activeSessions = await this.getSessions();
     if (activeSessions.length >= config.maxSessions) {
       throw new Error(`Maximum sessions (${config.maxSessions}) reached`);
     }
 
-    // Check if name already exists
     const existing = await this.getSession(request.name);
     if (existing) {
       throw new Error(`Session '${request.name}' already exists`);
@@ -87,13 +86,19 @@ export const sessionManager: ISessionManager = {
 
     const id = crypto.randomUUID();
     const tmuxSessionName = `claude-${request.name}`;
+    const claudeCmd = buildClaudeCommand(config, request);
 
-    // TODO: Implement actual session creation
-    // 1. Create tmux session
-    // 2. Start Claude Code with --dangerously-skip-permissions
-    // 3. If initialPrompt provided, send it
-    // 4. Set up pipe-pane for archiving
-    // 5. Store in local state and sync to Supabase
+    // 1. Create tmux session running Claude Code
+    await tmux.createSession(tmuxSessionName, claudeCmd, request.projectPath);
+
+    // 2. Set up pipe-pane for archiving output
+    try {
+      const logPath = await ensureArchiveLogPath(request.name);
+      await tmux.startPipePane(tmuxSessionName, logPath);
+    } catch (err) {
+      console.error(`Failed to set up pipe-pane for ${tmuxSessionName}:`, err);
+      // Non-fatal — session still works without archiving
+    }
 
     const session: Session = {
       id,
@@ -102,94 +107,84 @@ export const sessionManager: ISessionManager = {
       projectPath: request.projectPath,
       description: request.description,
       initialPrompt: request.initialPrompt,
-      status: 'created',
+      status: 'running',
       createdAt: new Date(),
       updatedAt: new Date(),
+      lastActivityAt: new Date(),
       errorCount: 0,
       isPreserved: false,
       metadata: {},
     };
 
     sessions.set(id, session);
+    console.log(`Session created: ${request.name} (${id}) → tmux:${tmuxSessionName}`);
     return session;
   },
 
   async sendMessage(sessionId: string, message: string): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
-    }
-
-    // TODO: Implement - send keys to tmux session
-    // await tmux.sendKeys(session.tmuxSession, message);
-
-    // Update last activity
+    const session = await resolveSession(sessionId);
+    await tmux.sendKeys(session.tmuxSession, message);
     session.updatedAt = new Date();
     session.lastActivityAt = new Date();
   },
 
   async stopSession(sessionId: string): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
-    }
-
-    // TODO: Implement - send Ctrl+C to tmux session
-    // await tmux.sendCtrlC(session.tmuxSession);
-
+    const session = await resolveSession(sessionId);
+    await tmux.sendCtrlC(session.tmuxSession);
     session.status = 'stopped';
     session.updatedAt = new Date();
   },
 
   async killSession(sessionId: string): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
-    }
+    const session = await resolveSession(sessionId);
 
-    // TODO: Implement - kill tmux session
-    // await tmux.killSession(session.tmuxSession);
+    // Stop archiving first
+    try {
+      await tmux.stopPipePane(session.tmuxSession);
+    } catch { /* ignore if already gone */ }
+
+    try {
+      await tmux.killSession(session.tmuxSession);
+    } catch { /* tmux session may already be dead */ }
 
     session.status = 'killed';
     session.updatedAt = new Date();
-    sessions.delete(sessionId);
+    sessions.delete(session.id);
+    console.log(`Session killed: ${session.name} (${session.id})`);
   },
 
   async resumeSession(sessionId: string): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
-    }
-
-    // TODO: Implement - send /resume command to session
-    // await tmux.sendKeys(session.tmuxSession, '/resume');
-
+    const session = await resolveSession(sessionId);
+    await tmux.sendKeys(session.tmuxSession, '/resume');
     session.status = 'running';
     session.isPreserved = false;
     session.updatedAt = new Date();
   },
 
   async getSessionOutput(sessionId: string, lines = 200): Promise<string> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
-    }
-
-    // TODO: Implement - capture tmux pane content
-    // return await tmux.capturePane(session.tmuxSession, lines);
-    return '';
+    const session = await resolveSession(sessionId);
+    return tmux.capturePane(session.tmuxSession, lines);
   },
 
-  async updateSessionStatus(
-    sessionId: string,
-    status: SessionStatus
-  ): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      throw new Error(`Session '${sessionId}' not found`);
-    }
-
+  async updateSessionStatus(sessionId: string, status: SessionStatus): Promise<void> {
+    const session = await resolveSession(sessionId);
     session.status = status;
     session.updatedAt = new Date();
+  },
+
+  /**
+   * Reconcile in-memory state with actual tmux sessions.
+   * Marks sessions as killed if their tmux session no longer exists.
+   */
+  async reconcile(): Promise<void> {
+    for (const session of sessions.values()) {
+      const exists = await tmux.sessionExists(session.tmuxSession);
+      if (!exists && session.status !== 'killed') {
+        console.log(`Reconcile: tmux session gone for ${session.name}, marking killed`);
+        session.status = 'killed';
+        session.updatedAt = new Date();
+        sessions.delete(session.id);
+      }
+    }
   },
 };

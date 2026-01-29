@@ -1,15 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type {
-  Session,
   CreateSessionRequest,
   SessionListResponse,
   SessionWithOutput,
 } from '@claude-voice-commander/shared';
+import { sessionManager } from '../services/session-manager';
 
 const sessionRoutes = new Hono();
 
-// Request validation schemas
 const createSessionSchema = z.object({
   name: z.string().min(1).max(100),
   projectPath: z.string().optional(),
@@ -21,153 +20,83 @@ const sendMessageSchema = z.object({
   message: z.string().min(1),
 });
 
-/**
- * GET /sessions
- * List all active sessions
- */
+/** GET /sessions — List all active sessions */
 sessionRoutes.get('/', async (c) => {
-  // TODO: Get sessions from session manager
-  const response: SessionListResponse = {
-    sessions: [],
-  };
+  const sessions = await sessionManager.getSessions();
+  const response: SessionListResponse = { sessions };
   return c.json(response);
 });
 
-/**
- * POST /sessions
- * Create a new session
- */
+/** POST /sessions — Create a new session */
 sessionRoutes.post('/', async (c) => {
   const body = await c.req.json();
   const parsed = createSessionSchema.safeParse(body);
-
   if (!parsed.success) {
     return c.json({ error: 'Invalid request', details: parsed.error.issues }, 400);
   }
 
-  const request: CreateSessionRequest = parsed.data;
-
-  // TODO: Create session via session manager
-  // const session = await sessionManager.createSession(request);
-
-  // Stub response
-  const session: Session = {
-    id: crypto.randomUUID(),
-    name: request.name,
-    tmuxSession: `claude-${request.name}`,
-    projectPath: request.projectPath,
-    description: request.description,
-    initialPrompt: request.initialPrompt,
-    status: 'created',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    errorCount: 0,
-    isPreserved: false,
-    metadata: {},
-  };
-
+  const session = await sessionManager.createSession(parsed.data);
   return c.json({ session }, 201);
 });
 
-/**
- * GET /sessions/:id
- * Get session details with recent output
- */
+/** GET /sessions/:id — Get session details with recent output */
 sessionRoutes.get('/:id', async (c) => {
-  const id = c.req.param('id');
+  const session = await sessionManager.getSession(c.req.param('id'));
+  if (!session) {
+    return c.json({ error: 'Session not found' }, 404);
+  }
 
-  // TODO: Get session from session manager
-  // const session = await sessionManager.getSession(id);
-  // if (!session) {
-  //   return c.json({ error: 'Session not found' }, 404);
-  // }
+  let recentOutput = '';
+  try {
+    recentOutput = await sessionManager.getSessionOutput(session.id, 50);
+  } catch { /* tmux may be gone */ }
 
-  return c.json({ error: 'Not implemented' }, 501);
+  const result: SessionWithOutput = { ...session, recentOutput };
+  return c.json({ session: result });
 });
 
-/**
- * GET /sessions/:id/output
- * Get session output with optional pagination
- */
+/** GET /sessions/:id/output — Get session terminal output */
 sessionRoutes.get('/:id/output', async (c) => {
   const id = c.req.param('id');
   const lines = parseInt(c.req.query('lines') || '200', 10);
-  const offset = parseInt(c.req.query('offset') || '0', 10);
-
-  // TODO: Get output from session manager
-  // const output = await sessionManager.getSessionOutput(id, lines, offset);
-
-  return c.json({ error: 'Not implemented' }, 501);
+  const output = await sessionManager.getSessionOutput(id, lines);
+  return c.json({ output });
 });
 
-/**
- * POST /sessions/:id/send
- * Send a message to the session
- */
+/** POST /sessions/:id/send — Send a message to the session */
 sessionRoutes.post('/:id/send', async (c) => {
   const id = c.req.param('id');
   const body = await c.req.json();
   const parsed = sendMessageSchema.safeParse(body);
-
   if (!parsed.success) {
     return c.json({ error: 'Invalid request', details: parsed.error.issues }, 400);
   }
 
-  // TODO: Send message via session manager
-  // await sessionManager.sendMessage(id, parsed.data.message);
-
+  await sessionManager.sendMessage(id, parsed.data.message);
   return c.json({ success: true });
 });
 
-/**
- * POST /sessions/:id/stop
- * Send Ctrl+C to interrupt the session
- */
+/** POST /sessions/:id/stop — Ctrl+C the session */
 sessionRoutes.post('/:id/stop', async (c) => {
-  const id = c.req.param('id');
-
-  // TODO: Stop session via session manager
-  // await sessionManager.stopSession(id);
-
+  await sessionManager.stopSession(c.req.param('id'));
   return c.json({ success: true });
 });
 
-/**
- * POST /sessions/:id/kill
- * Terminate the session completely
- */
+/** POST /sessions/:id/kill — Terminate session */
 sessionRoutes.post('/:id/kill', async (c) => {
-  const id = c.req.param('id');
-
-  // TODO: Kill session via session manager
-  // await sessionManager.killSession(id);
-
+  await sessionManager.killSession(c.req.param('id'));
   return c.json({ success: true });
 });
 
-/**
- * POST /sessions/:id/resume
- * Run /resume command in the session
- */
+/** POST /sessions/:id/resume — Resume a preserved session */
 sessionRoutes.post('/:id/resume', async (c) => {
-  const id = c.req.param('id');
-
-  // TODO: Resume session via session manager
-  // await sessionManager.resumeSession(id);
-
+  await sessionManager.resumeSession(c.req.param('id'));
   return c.json({ success: true });
 });
 
-/**
- * DELETE /sessions/:id
- * Alias for kill
- */
+/** DELETE /sessions/:id — Alias for kill */
 sessionRoutes.delete('/:id', async (c) => {
-  const id = c.req.param('id');
-
-  // TODO: Kill session via session manager
-  // await sessionManager.killSession(id);
-
+  await sessionManager.killSession(c.req.param('id'));
   return c.json({ success: true });
 });
 

@@ -9,118 +9,133 @@ import { attentionQueue } from './attention-queue';
 import * as tmux from '../lib/tmux';
 import { getConfig } from '../lib/config';
 
-/**
- * Output Monitor Service
- *
- * Polls tmux session output and detects patterns that need attention.
- * Detected patterns:
- * - Questions (priority 3)
- * - Errors (priority 5)
- * - Blocking (priority 4)
- * - Completions (priority 1)
- */
 export interface IOutputMonitor {
-  /** Start the polling loop */
   start(): void;
-
-  /** Stop the polling loop */
   stop(): void;
-
-  /** Check if monitor is running */
   isRunning(): boolean;
-
-  /** Manually poll all sessions (for testing) */
   pollAll(): Promise<AttentionItem[]>;
 }
 
-/**
- * Output hash cache for detecting changes
- */
+/** Output hash cache — tracks last seen content per session */
 const outputHashes = new Map<string, string>();
 
-/**
- * Monitor state
- */
+/** Tracks the last detection type per session to avoid duplicate alerts */
+const lastDetection = new Map<string, { type: AttentionType; matchedLine: string }>();
+
 let isMonitorRunning = false;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-/**
- * Detection patterns
- * TODO: Move to configurable patterns file
- */
-const PATTERNS = {
-  question: [
-    /\?$/m, // Ends with question mark
-    /what would you like me to/i,
-    /should I/i,
-    /do you want me to/i,
-    /please clarify/i,
-    /which (?:one|option)/i,
-    /would you prefer/i,
-  ],
-  error: [
-    /error:/i,
-    /failed:/i,
-    /exception:/i,
-    /traceback/i,
-    /permission denied/i,
-    /cannot |unable to /i,
-    /ENOENT|EACCES|EPERM/i,
-    /fatal:/i,
-    /panic:/i,
-  ],
-  completion: [
-    /task complete/i,
-    /done!/i,
-    /finished/i,
-    /all tests passing/i,
-    /successfully/i,
-    /completed/i,
-  ],
-  blocking: [
-    /waiting for (?:input|response)/i,
-    /please (?:provide|enter|specify)/i,
-    /need(?:s)? (?:your|more) input/i,
-  ],
-};
+// ---------------------------------------------------------------------------
+// Anti-patterns: lines matching these are skipped before detection
+// ---------------------------------------------------------------------------
+const ANTI_PATTERNS = [
+  /\[INFO\]|\[DEBUG\]|\[WARN\]/i,
+  /logging error/i,
+  /error handling/i,
+  /^#|^\/\/|^\*/,
+  /TODO:|FIXME:|NOTE:/,
+  /should .+ when/i,
+  /previously failed/i,
+  /was an error/i,
+  /fixed the error/i,
+  // Claude Code UI chrome — ignore prompt lines, borders, and status bars
+  /^❯/,
+  /^\s*Opus \d/,
+  /bypass permissions/i,
+  /shift\+Tab to cycle/i,
+  /^╭|^│|^╰|^─/,
+  /Welcome back/i,
+  /ctrl\+o to expand/i,
+  /Enter to select/i,
+  /Tab\/Arrow keys/i,
+];
 
-/**
- * Detect attention type from output content
- */
-function detectAttentionType(
+// ---------------------------------------------------------------------------
+// Detection patterns ordered by priority
+// ---------------------------------------------------------------------------
+const PATTERNS: { type: AttentionType; priority: AttentionPriority; patterns: RegExp[] }[] = [
+  {
+    type: 'error',
+    priority: 5,
+    patterns: [
+      /error:/i,
+      /failed:/i,
+      /exception:/i,
+      /traceback/i,
+      /permission denied/i,
+      /cannot |unable to /i,
+      /ENOENT|EACCES|EPERM|ECONNREFUSED/i,
+      /fatal:/i,
+      /panic:/i,
+      /compilation failed/i,
+      /build failed/i,
+      /syntax error/i,
+      /test failed/i,
+      /assertion failed/i,
+    ],
+  },
+  {
+    type: 'blocking',
+    priority: 4,
+    patterns: [
+      /waiting for (?:input|response|confirmation)/i,
+      /please (?:provide|enter|specify|confirm)/i,
+      /need(?:s)? (?:your|more) input/i,
+      /cannot proceed without/i,
+      /before I can continue/i,
+      /I need you to/i,
+    ],
+  },
+  {
+    type: 'question',
+    priority: 3,
+    patterns: [
+      /\?$/m,
+      /what would you like me to/i,
+      /should I/i,
+      /do you want me to/i,
+      /please clarify/i,
+      /which (?:one|option|approach)/i,
+      /would you prefer/i,
+      /how should I/i,
+    ],
+  },
+  {
+    type: 'completion',
+    priority: 1,
+    patterns: [
+      /task complete/i,
+      /done!/i,
+      /finished/i,
+      /all tests pass/i,
+      /successfully/i,
+      /I've completed/i,
+      /here's what I did/i,
+      /build succeeded/i,
+    ],
+  },
+];
+
+function isAntiPattern(line: string): boolean {
+  return ANTI_PATTERNS.some((p) => p.test(line));
+}
+
+export function detectAttentionType(
   content: string
 ): { type: AttentionType; priority: AttentionPriority; matchedLine: string } | null {
   const lines = content.split('\n');
-
-  // Check last 20 lines for patterns
   const recentLines = lines.slice(-20);
 
   for (const line of recentLines.reverse()) {
-    // Check for errors first (highest priority)
-    for (const pattern of PATTERNS.error) {
-      if (pattern.test(line)) {
-        return { type: 'error', priority: 5, matchedLine: line };
-      }
-    }
+    // Strip Claude Code output prefix (⏺) before checking
+    const trimmed = line.trim().replace(/^⏺\s*/, '');
+    if (!trimmed || isAntiPattern(trimmed)) continue;
 
-    // Check for blocking
-    for (const pattern of PATTERNS.blocking) {
-      if (pattern.test(line)) {
-        return { type: 'blocking', priority: 4, matchedLine: line };
-      }
-    }
-
-    // Check for questions
-    for (const pattern of PATTERNS.question) {
-      if (pattern.test(line)) {
-        return { type: 'question', priority: 3, matchedLine: line };
-      }
-    }
-
-    // Check for completions
-    for (const pattern of PATTERNS.completion) {
-      if (pattern.test(line)) {
-        return { type: 'completion', priority: 1, matchedLine: line };
+    for (const group of PATTERNS) {
+      for (const pattern of group.patterns) {
+        if (pattern.test(trimmed)) {
+          return { type: group.type, priority: group.priority, matchedLine: trimmed };
+        }
       }
     }
   }
@@ -128,54 +143,61 @@ function detectAttentionType(
   return null;
 }
 
-/**
- * Get context (surrounding lines) for an attention item
- */
 function getContext(content: string, matchedLine: string, contextLines = 20): string {
   const lines = content.split('\n');
-  const matchIndex = lines.findIndex((l) => l === matchedLine);
-
+  const matchIndex = lines.findIndex((l) => l.trim() === matchedLine);
   if (matchIndex === -1) {
-    // Return last N lines if match not found
     return lines.slice(-contextLines).join('\n');
   }
-
   const start = Math.max(0, matchIndex - Math.floor(contextLines / 2));
   const end = Math.min(lines.length, matchIndex + Math.ceil(contextLines / 2));
-
   return lines.slice(start, end).join('\n');
 }
 
-/**
- * Poll a single session for attention items
- */
-async function pollSession(session: Session): Promise<AttentionItem | null> {
+async function pollSession(session: Session): Promise<Omit<AttentionItem, 'id' | 'detectedAt'> | null> {
   try {
-    // Get current output
     const output = await tmux.capturePane(session.tmuxSession, 200);
 
-    // Get hash for change detection
+    // Change detection via hash
     const hasher = new Bun.CryptoHasher('md5');
     hasher.update(output);
     const currentHash = hasher.digest('hex');
 
-    // Check if output changed
     const previousHash = outputHashes.get(session.id);
     if (currentHash === previousHash) {
-      return null; // No change
+      return null;
     }
-
-    // Update hash
     outputHashes.set(session.id, currentHash);
+
+    // Update session output preview
+    const lines = output.split('\n').filter((l) => l.trim());
+    session.lastOutputPreview = lines.slice(-3).join('\n');
 
     // Detect attention type
     const detected = detectAttentionType(output);
     if (!detected) {
+      // Output changed but no pattern matched — session is active
+      await sessionManager.updateSessionStatus(session.id, 'running');
+      lastDetection.delete(session.id);
       return null;
     }
 
-    // Create attention item
-    const item: Omit<AttentionItem, 'id' | 'detectedAt'> = {
+    // Dedup: skip if same detection type + matched line as last poll
+    const prev = lastDetection.get(session.id);
+    if (prev && prev.type === detected.type && prev.matchedLine === detected.matchedLine) {
+      return null;
+    }
+    lastDetection.set(session.id, { type: detected.type, matchedLine: detected.matchedLine });
+
+    // Update session status based on detection
+    if (detected.type === 'question' || detected.type === 'blocking') {
+      await sessionManager.updateSessionStatus(session.id, 'waiting_input');
+    } else if (detected.type === 'error') {
+      await sessionManager.updateSessionStatus(session.id, 'error');
+      session.errorCount++;
+    }
+
+    return {
       sessionId: session.id,
       sessionName: session.name,
       type: detected.type,
@@ -184,17 +206,18 @@ async function pollSession(session: Session): Promise<AttentionItem | null> {
       context: getContext(output, detected.matchedLine),
       metadata: {},
     };
-
-    return item as AttentionItem;
   } catch (error) {
     console.error(`Error polling session ${session.name}:`, error);
     return null;
   }
 }
 
-/**
- * Output Monitor Implementation
- */
+/** Clean up tracking state for a removed session */
+export function clearSessionState(sessionId: string): void {
+  outputHashes.delete(sessionId);
+  lastDetection.delete(sessionId);
+}
+
 export const outputMonitor: IOutputMonitor = {
   start(): void {
     if (isMonitorRunning) {
@@ -205,27 +228,23 @@ export const outputMonitor: IOutputMonitor = {
     const config = getConfig();
     isMonitorRunning = true;
 
-    console.log(`Starting output monitor (poll interval: ${config.pollIntervalMs}ms)`);
+    console.log(`Output monitor started (poll every ${config.pollIntervalMs}ms)`);
 
     pollInterval = setInterval(async () => {
       try {
         await this.pollAll();
       } catch (error) {
-        console.error('Error in poll cycle:', error);
+        console.error('Poll cycle error:', error);
       }
     }, config.pollIntervalMs);
   },
 
   stop(): void {
-    if (!isMonitorRunning) {
-      return;
-    }
-
+    if (!isMonitorRunning) return;
     if (pollInterval) {
       clearInterval(pollInterval);
       pollInterval = null;
     }
-
     isMonitorRunning = false;
     console.log('Output monitor stopped');
   },
@@ -238,16 +257,22 @@ export const outputMonitor: IOutputMonitor = {
     const sessions = await sessionManager.getSessions();
     const items: AttentionItem[] = [];
 
-    // Only poll active sessions
     const activeSessions = sessions.filter(
-      (s) => s.status === 'running' || s.status === 'waiting_input'
+      (s) => s.status === 'running' || s.status === 'waiting_input' || s.status === 'error'
     );
+
+    // Also reconcile — detect tmux sessions that died
+    await sessionManager.reconcile();
 
     for (const session of activeSessions) {
       const item = await pollSession(session);
       if (item) {
-        items.push(item);
+        // attentionQueue.addItem assigns id and detectedAt
         await attentionQueue.addItem(item);
+        // Retrieve the full item from the queue state for return
+        const queueState = attentionQueue.getState();
+        const added = queueState.items[queueState.items.length - 1];
+        if (added) items.push(added);
       }
     }
 

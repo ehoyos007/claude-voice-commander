@@ -13,12 +13,12 @@
 
 ### Pi Service Implementation
 - [x] Health endpoint
-- [x] Session routes (stubs)
-- [x] Attention routes (stubs)
-- [x] tmux.ts wrappers
+- [x] Session routes (wired to session manager)
+- [x] Attention routes (wired to attention queue)
+- [x] tmux.ts wrappers (rewritten with Bun.spawn)
 - [x] config.ts validation
-- [ ] Implement session-manager.ts (create tmux sessions with Claude)
-- [ ] Implement output-monitor.ts (polling loop)
+- [x] Implement session-manager.ts (create tmux sessions with Claude)
+- [x] Implement output-monitor.ts (polling loop + pattern detection)
 - [ ] Implement state-persistence.ts (local JSON)
 - [ ] Connect to Supabase
 
@@ -32,7 +32,10 @@
 ### Testing
 - [x] Health endpoint works
 - [x] Auth middleware works
-- [ ] tmux session creation works
+- [x] tmux session creation works
+- [x] sendKeys delivers messages to Claude Code
+- [x] Output monitor detects errors (p5) with no false positives
+- [x] Attention queue populates + batch timer fires
 - [ ] End-to-end: call → create session
 
 ---

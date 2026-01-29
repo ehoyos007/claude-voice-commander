@@ -43,23 +43,72 @@ e274d16 - init: scaffold Claude Voice Commander monorepo project
 
 ---
 
-## Next Session: Continue with Phase 1
+---
+
+## Session: January 29, 2026
+
+### What We Did
+1. **Implemented session-manager.ts** — Full tmux session lifecycle (create, send, stop, kill, resume, output capture, reconcile)
+2. **Rewrote tmux.ts** — Replaced Bun `$` template literals with `Bun.spawn` for reliable arg passing; added `-l` (literal) flag for sendKeys
+3. **Implemented output-monitor.ts** — Polling loop with pattern detection, anti-patterns for Claude Code UI chrome, change detection via hash, deduplication, session status updates
+4. **Wired up all routes** — Session routes and attention routes now call real services instead of returning stubs
+5. **Fixed attention-queue.ts** — Removed invalid type imports, added logging
+6. **Installed tmux** via Homebrew (wasn't on Mac)
+7. **Extensive local testing** — E2E: create session → Claude boots → send message → detect errors → attention queue populates → batch timer fires
+
+### Key Fixes
+| Issue | Fix |
+|-------|-----|
+| Bun `$` template literals unreliable with tmux args | Rewrote all tmux functions to use `Bun.spawn` with explicit arg arrays |
+| `sendKeys` text not submitted to Claude Code | Split into literal text (`-l` flag) + separate Enter key |
+| False positives on Claude UI lines (`❯`, `╭│╰─`) | Added anti-pattern filters for Claude Code chrome |
+| `⏺` prefix blocking Claude's output content | Strip `⏺` before pattern matching instead of filtering |
+| Attention routes returning stub `[]` | Wired to actual `attentionQueue` service |
+| `attention-queue.ts` importing const values as types | Removed `ATTENTION_WINDOWS_MS`, `MAX_ATTENTION_WINDOW_MS` from type import |
+
+### Files Modified
+- `packages/pi-service/src/services/session-manager.ts` — Full implementation
+- `packages/pi-service/src/services/output-monitor.ts` — Full implementation with anti-patterns
+- `packages/pi-service/src/services/attention-queue.ts` — Fixed imports, added logging
+- `packages/pi-service/src/lib/tmux.ts` — Complete rewrite (Bun.spawn)
+- `packages/pi-service/src/routes/sessions.ts` — Wired to sessionManager
+- `packages/pi-service/src/routes/attention.ts` — Wired to attentionQueue
+- `packages/pi-service/src/index.ts` — Starts output monitor, graceful shutdown
+
+### Tested & Verified
+- Session creation → real tmux + Claude Code running
+- `GET /sessions` lists real sessions
+- `POST /sessions/:id/send` delivers messages to Claude
+- `POST /sessions/:id/stop` sends Ctrl+C
+- `POST /sessions/:id/kill` destroys tmux session
+- `GET /sessions/:id/output` captures terminal content
+- Archive logging to `~/.claude-commander/archives/`
+- Duplicate session name rejection
+- Output monitor: no false positives on Claude welcome screen
+- Output monitor: detects `Error:` patterns as priority 5
+- Attention queue: items populated with context, batch timer fires
+- Anti-patterns: `❯` prompt lines, UI borders, status bar all filtered
+
+---
+
+## Next Session: Continue Phase 1
 
 ### Immediate Next Steps
-1. Create Supabase project at supabase.com
-2. Run `supabase/migrations/001_initial_schema.sql` in SQL Editor
-3. Update `.env` with real Supabase credentials
-4. Implement `session-manager.ts` to create actual tmux sessions
-5. Test tmux integration locally
+1. Implement `state-persistence.ts` (local JSON, reboot survival)
+2. Create Supabase project and deploy schema
+3. Connect Pi service to Supabase
+4. Set up Tailscale Funnel on Pi
 
 ### Phase 1 Remaining Work
-- [ ] tmux session creation with Claude Code
+- [ ] state-persistence.ts
+- [ ] Supabase project + schema deploy
+- [ ] Supabase connection in Pi service
 - [ ] Tailscale Funnel setup on Pi
 - [ ] First n8n workflow (inbound calls)
 - [ ] Telnyx Call Control integration
 - [ ] ElevenLabs TTS integration
 - [ ] Claude API intent classification
-- [ ] End-to-end test: call in, create session
+- [ ] End-to-end test: call in → create session
 
 ### Commands to Resume
 ```bash

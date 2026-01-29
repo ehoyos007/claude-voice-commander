@@ -1,7 +1,7 @@
-import { $ } from 'bun';
-
 /**
- * tmux session management utilities using Bun shell
+ * tmux session management utilities using Bun.spawn
+ *
+ * Uses Bun.spawn with explicit arg arrays for reliable argument passing.
  */
 
 export interface TmuxSession {
@@ -11,13 +11,29 @@ export interface TmuxSession {
   attached: boolean;
 }
 
-/**
- * List all tmux sessions
- */
+/** Run a tmux command and return stdout */
+async function run(...args: string[]): Promise<string> {
+  const proc = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`tmux ${args[0]} failed (exit ${exitCode}): ${stderr.trim()}`);
+  }
+  return new Response(proc.stdout).text();
+}
+
+/** Run a tmux command, ignoring errors (returns success boolean) */
+async function tryRun(...args: string[]): Promise<boolean> {
+  const proc = Bun.spawn(['tmux', ...args], { stdout: 'ignore', stderr: 'ignore' });
+  return (await proc.exited) === 0;
+}
+
 export async function listSessions(): Promise<TmuxSession[]> {
   try {
-    const result = await $`tmux list-sessions -F "#{session_name}|#{session_windows}|#{session_created}|#{session_attached}"`.text();
-
+    const result = await run(
+      'list-sessions', '-F',
+      '#{session_name}|#{session_windows}|#{session_created}|#{session_attached}'
+    );
     return result
       .trim()
       .split('\n')
@@ -31,33 +47,15 @@ export async function listSessions(): Promise<TmuxSession[]> {
           attached: attached === '1',
         };
       });
-  } catch (error) {
-    // No sessions exist or tmux not running
-    if (error instanceof Error && error.message.includes('no server running')) {
-      return [];
-    }
-    throw error;
-  }
-}
-
-/**
- * Check if a specific session exists
- */
-export async function sessionExists(name: string): Promise<boolean> {
-  try {
-    await $`tmux has-session -t ${name}`.quiet();
-    return true;
   } catch {
-    return false;
+    return [];
   }
 }
 
-/**
- * Create a new tmux session
- * @param name - Session name
- * @param command - Command to run in the session (optional)
- * @param cwd - Working directory (optional)
- */
+export async function sessionExists(name: string): Promise<boolean> {
+  return tryRun('has-session', '-t', name);
+}
+
 export async function createSession(
   name: string,
   command?: string,
@@ -67,35 +65,28 @@ export async function createSession(
     throw new Error(`Session '${name}' already exists`);
   }
 
-  const args = ['-d', '-s', name];
-
+  const args = ['tmux', 'new-session', '-d', '-s', name];
   if (cwd) {
     args.push('-c', cwd);
   }
-
   if (command) {
-    args.push(command);
+    // tmux new-session takes the command as a single trailing argument via shell
+    // We need sh -c to handle the full command string with flags
+    args.push('sh', '-c', command);
   }
 
-  await $`tmux new-session ${args}`;
+  const proc = Bun.spawn(args, { stdout: 'inherit', stderr: 'pipe' });
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text();
+    throw new Error(`tmux new-session failed (exit ${exitCode}): ${stderr.trim()}`);
+  }
 }
 
-/**
- * Kill a tmux session
- */
 export async function killSession(name: string): Promise<void> {
-  if (!(await sessionExists(name))) {
-    throw new Error(`Session '${name}' does not exist`);
-  }
-  await $`tmux kill-session -t ${name}`;
+  await run('kill-session', '-t', name);
 }
 
-/**
- * Send keys to a tmux session
- * @param session - Session name
- * @param keys - Keys to send (will append Enter by default)
- * @param noEnter - If true, don't append Enter key
- */
 export async function sendKeys(
   session: string,
   keys: string,
@@ -105,53 +96,41 @@ export async function sendKeys(
     throw new Error(`Session '${session}' does not exist`);
   }
 
-  // Escape special characters for tmux
-  const escapedKeys = keys
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\$/g, '\\$');
+  // Send text with -l (literal) so tmux doesn't interpret special chars
+  const textProc = Bun.spawn(['tmux', 'send-keys', '-t', session, '-l', keys], {
+    stdout: 'inherit',
+    stderr: 'pipe',
+  });
+  const textExit = await textProc.exited;
+  if (textExit !== 0) {
+    const stderr = await new Response(textProc.stderr).text();
+    throw new Error(`tmux send-keys (text) failed (exit ${textExit}): ${stderr.trim()}`);
+  }
 
-  if (noEnter) {
-    await $`tmux send-keys -t ${session} "${escapedKeys}"`;
-  } else {
-    await $`tmux send-keys -t ${session} "${escapedKeys}" Enter`;
+  // Send Enter as a separate command (Enter is a tmux key name, not literal)
+  if (!noEnter) {
+    const enterProc = Bun.spawn(['tmux', 'send-keys', '-t', session, 'Enter'], {
+      stdout: 'inherit',
+      stderr: 'pipe',
+    });
+    await enterProc.exited;
   }
 }
 
-/**
- * Send Ctrl+C to interrupt a session
- */
 export async function sendCtrlC(session: string): Promise<void> {
   if (!(await sessionExists(session))) {
     throw new Error(`Session '${session}' does not exist`);
   }
-  await $`tmux send-keys -t ${session} C-c`;
+  await run('send-keys', '-t', session, 'C-c');
 }
 
-/**
- * Capture the current pane content
- * @param session - Session name
- * @param lines - Number of lines to capture (default: 200)
- * @returns The captured pane content
- */
-export async function capturePane(
-  session: string,
-  lines = 200
-): Promise<string> {
+export async function capturePane(session: string, lines = 200): Promise<string> {
   if (!(await sessionExists(session))) {
     throw new Error(`Session '${session}' does not exist`);
   }
-
-  // Capture from scrollback buffer
-  // -p prints to stdout instead of a file
-  // -S specifies start line (negative for scrollback)
-  const result = await $`tmux capture-pane -t ${session} -p -S -${lines}`.text();
-  return result;
+  return run('capture-pane', '-t', session, '-p', '-S', `-${lines}`);
 }
 
-/**
- * Get the current pane content hash (for detecting changes)
- */
 export async function getPaneHash(session: string): Promise<string> {
   const content = await capturePane(session, 50);
   const hasher = new Bun.CryptoHasher('md5');
@@ -159,50 +138,30 @@ export async function getPaneHash(session: string): Promise<string> {
   return hasher.digest('hex');
 }
 
-/**
- * Set up pipe-pane to log session output to a file
- * @param session - Session name
- * @param logFile - Path to log file
- */
-export async function startPipePane(
-  session: string,
-  logFile: string
-): Promise<void> {
+export async function startPipePane(session: string, logFile: string): Promise<void> {
   if (!(await sessionExists(session))) {
     throw new Error(`Session '${session}' does not exist`);
   }
-  await $`tmux pipe-pane -t ${session} "cat >> ${logFile}"`;
+  await run('pipe-pane', '-t', session, `cat >> ${logFile}`);
 }
 
-/**
- * Stop pipe-pane logging
- */
 export async function stopPipePane(session: string): Promise<void> {
   if (!(await sessionExists(session))) {
     throw new Error(`Session '${session}' does not exist`);
   }
-  await $`tmux pipe-pane -t ${session}`;
+  await run('pipe-pane', '-t', session);
 }
 
-/**
- * Rename a tmux session
- */
-export async function renameSession(
-  oldName: string,
-  newName: string
-): Promise<void> {
+export async function renameSession(oldName: string, newName: string): Promise<void> {
   if (!(await sessionExists(oldName))) {
     throw new Error(`Session '${oldName}' does not exist`);
   }
   if (await sessionExists(newName)) {
     throw new Error(`Session '${newName}' already exists`);
   }
-  await $`tmux rename-session -t ${oldName} ${newName}`;
+  await run('rename-session', '-t', oldName, newName);
 }
 
-/**
- * Get session info (windows, attached status, etc.)
- */
 export async function getSessionInfo(name: string): Promise<TmuxSession | null> {
   const sessions = await listSessions();
   return sessions.find((s) => s.name === name) || null;
