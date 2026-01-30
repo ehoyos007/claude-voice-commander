@@ -47,7 +47,7 @@ Voice-controlled system for managing Claude Code sessions on a Raspberry Pi. Cal
 
 1. **Clone and install**
    ```bash
-   git clone https://github.com/yourusername/claude-voice-commander
+   git clone https://github.com/ehoyos007/claude-voice-commander
    cd claude-voice-commander
    npm install
    ```
