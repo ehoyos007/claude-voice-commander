@@ -1,0 +1,737 @@
+{
+  "name": "03 - SMS Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telnyx-sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Telnyx SMS Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-704, 304],
+      "id": "sms-webhook-001",
+      "webhookId": "telnyx-sms"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={}",
+        "options": {}
+      },
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [-480, 304],
+      "id": "sms-respond-001"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.data.event_type }}",
+              "value2": "message.received"
+            }
+          ]
+        }
+      },
+      "name": "Is Inbound SMS?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [-256, 304],
+      "id": "sms-is-inbound-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract SMS details and load/create conversation state\nconst webhookData = $input.first().json;\nconst payload = webhookData.data.payload;\n\nconst fromNumber = payload.from?.phone_number || payload.from;\nconst toNumber = payload.to?.[0]?.phone_number || payload.to;\nconst messageText = payload.text || '';\nconst messageId = payload.id;\n\n// Generate a conversation ID based on phone number\nconst conversationId = `sms-${fromNumber.replace(/\\D/g, '')}`;\n\nreturn {\n  json: {\n    conversationId,\n    fromNumber,\n    toNumber,\n    messageText,\n    messageId,\n    receivedAt: new Date().toISOString()\n  }\n};"
+      },
+      "name": "Extract SMS Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 240],
+      "id": "sms-extract-001"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/sms_conversations?conversation_id=eq.{{ $json.conversationId }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Supabase: Get Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [224, 240],
+      "id": "sms-get-convo-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge existing conversation state or create new\nconst smsData = $('Extract SMS Data').first().json;\nconst existingConvo = $input.first().json;\n\nlet state;\nif (Array.isArray(existingConvo) && existingConvo.length > 0) {\n  // Existing conversation\n  state = existingConvo[0].state || {};\n  state.history = state.history || [];\n} else if (existingConvo && existingConvo.conversation_id) {\n  state = existingConvo.state || {};\n  state.history = state.history || [];\n} else {\n  // New conversation\n  state = {\n    history: [],\n    lastIntent: null,\n    sessionContext: {},\n    turnCount: 0\n  };\n}\n\n// Add user message to history\nstate.history.push({ role: 'user', content: smsData.messageText });\n\n// Keep history manageable\nif (state.history.length > 20) {\n  state.history = state.history.slice(-20);\n}\n\nstate.turnCount = (state.turnCount || 0) + 1;\n\nreturn {\n  json: {\n    ...smsData,\n    state,\n    isNewConversation: !existingConvo || (Array.isArray(existingConvo) && existingConvo.length === 0)\n  }\n};"
+      },
+      "name": "Merge Conversation State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [448, 240],
+      "id": "sms-merge-state-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Claude prompt for SMS intent classification and response\nconst { messageText, state, conversationId } = $json;\n\nconst historyText = state.history\n  .slice(-10)\n  .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)\n  .join('\\n');\n\nconst systemPrompt = `You are Claude, a helpful AI assistant managing Claude Code sessions on a Raspberry Pi via SMS.\n\nYou can help the user with:\n- Creating new coding sessions\n- Checking session status\n- Sending messages/instructions to running sessions\n- Stopping, killing, or resuming sessions\n- Checking for errors or attention items\n- General questions about their projects\n\nRespond conversationally but keep responses under 160 characters when possible (SMS limit). Be concise but helpful.\n\nIf the user's request is unclear, ask a brief clarifying question.\n\nAlso classify the intent as one of:\n- create_session, list_sessions, check_status, send_message, stop_session, kill_session, resume_session, get_errors, general_chat, unknown\n\nExtract sessionName and message if present.\n\nRespond with JSON:\n{\n  \"response\": \"Your SMS response here\",\n  \"intent\": \"...\",\n  \"sessionName\": null,\n  \"message\": null,\n  \"needsPiAction\": true/false\n}`;\n\nconst userMessage = historyText\n  ? `Conversation:\\n${historyText}\\n\\nRespond to the latest message.`\n  : `User said: \"${messageText}\"\\n\\nRespond.`;\n\nreturn {\n  json: {\n    systemPrompt,\n    userMessage,\n    conversationId,\n    messageText,\n    state\n  }\n};"
+      },
+      "name": "Build Claude Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [672, 240],
+      "id": "sms-build-prompt-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-3-5-haiku-latest\",\n  \"max_tokens\": 300,\n  \"system\": {{ JSON.stringify($json.systemPrompt) }},\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.userMessage) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "name": "Claude: Generate Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [896, 240],
+      "id": "sms-claude-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "njP19bKzhe25PSeR",
+          "name": "Claude PI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's response\nconst claudeResponse = $input.first().json;\nconst prevData = $('Build Claude Prompt').first().json;\nconst smsData = $('Extract SMS Data').first().json;\n\nlet parsed;\ntry {\n  const text = claudeResponse.content[0].text;\n  let jsonStr = text;\n  const jsonMatch = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/) || text.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    jsonStr = jsonMatch[1] || jsonMatch[0];\n  }\n  parsed = JSON.parse(jsonStr.trim());\n} catch (e) {\n  // If JSON parsing fails, use the raw text as response\n  parsed = {\n    response: claudeResponse.content[0].text.slice(0, 160),\n    intent: 'general_chat',\n    sessionName: null,\n    message: null,\n    needsPiAction: false\n  };\n}\n\n// Update state with assistant response\nconst state = { ...prevData.state };\nstate.history.push({ role: 'assistant', content: parsed.response });\nstate.lastIntent = parsed.intent;\n\nreturn {\n  json: {\n    responseText: parsed.response,\n    intent: parsed.intent || 'unknown',\n    sessionName: parsed.sessionName,\n    message: parsed.message,\n    needsPiAction: parsed.needsPiAction || false,\n    conversationId: prevData.conversationId,\n    fromNumber: smsData.fromNumber,\n    toNumber: smsData.toNumber,\n    state\n  }\n};"
+      },
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 240],
+      "id": "sms-parse-response-001"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.needsPiAction }}",
+                    "rightValue": "={{true}}",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [1344, 240],
+      "id": "sms-needs-action-001",
+      "name": "Needs Pi Action?"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "create_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "list_sessions",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "check_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "send_message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "stop_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "get_errors",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [1568, 80],
+      "id": "sms-route-intent-001",
+      "name": "Route Intent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": {{ JSON.stringify($json.sessionName || 'sms-project') }},\n  \"initialPrompt\": {{ JSON.stringify($json.message || '') }}\n}",
+        "options": {}
+      },
+      "name": "Pi: Create Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1792, -160],
+      "id": "sms-pi-create-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: List Sessions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1792, 0],
+      "id": "sms-pi-list-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://localhost:3000/sessions/{{ $json.sessionName || 'unknown' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Check Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1792, 160],
+      "id": "sms-pi-status-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/sessions/{{ $json.sessionName || 'unknown' }}/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {{ JSON.stringify($json.message || '') }}\n}",
+        "options": {}
+      },
+      "name": "Pi: Send Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1792, 320],
+      "id": "sms-pi-send-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/sessions/{{ $json.sessionName || 'unknown' }}/stop",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Stop Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1792, 480],
+      "id": "sms-pi-stop-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/attention",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Get Errors",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1792, 640],
+      "id": "sms-pi-errors-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build final SMS response incorporating Pi action results\nconst parseData = $('Parse Response').first().json;\nconst piResponse = $input.first().json;\nconst intent = parseData.intent;\n\nlet finalResponse = parseData.responseText;\n\n// Enhance response based on Pi results\nif (piResponse) {\n  switch (intent) {\n    case 'create_session':\n      if (piResponse.session) {\n        finalResponse = `Created ${piResponse.session.name}! ${parseData.message ? 'Working on it now.' : 'What should I do?'}`;\n      }\n      break;\n    case 'list_sessions':\n      const sessions = piResponse.sessions || piResponse || [];\n      if (Array.isArray(sessions) && sessions.length > 0) {\n        finalResponse = `Sessions: ${sessions.map(s => `${s.name} (${s.status})`).join(', ')}`;\n      } else {\n        finalResponse = 'No sessions running. Want to start one?';\n      }\n      break;\n    case 'check_status':\n      if (piResponse.session || piResponse.status) {\n        const s = piResponse.session || piResponse;\n        finalResponse = `${s.name || 'Session'}: ${s.status}${s.lastOutputPreview ? ' - ' + s.lastOutputPreview.slice(0, 50) : ''}`;\n      }\n      break;\n    case 'get_errors':\n      const items = piResponse.items || [];\n      const pending = items.filter(i => !i.resolvedAt);\n      finalResponse = pending.length > 0\n        ? `${pending.length} pending: ${pending[0].preview || pending[0].content?.slice(0, 80) || 'View details?'}`\n        : 'All clear! No errors.';\n      break;\n  }\n}\n\n// Truncate to SMS limit if needed\nif (finalResponse.length > 160) {\n  finalResponse = finalResponse.slice(0, 157) + '...';\n}\n\nreturn {\n  json: {\n    responseText: finalResponse,\n    conversationId: parseData.conversationId,\n    fromNumber: parseData.fromNumber,\n    toNumber: parseData.toNumber,\n    state: parseData.state,\n    intent\n  }\n};"
+      },
+      "name": "Build Final Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2016, 240],
+      "id": "sms-build-final-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $json.toNumber }}\",\n  \"to\": \"{{ $json.fromNumber }}\",\n  \"text\": {{ JSON.stringify($json.responseText) }}\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Send SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2240, 240],
+      "id": "sms-send-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/sms_conversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"conversation_id\": {{ JSON.stringify($json.conversationId) }},\n  \"phone_number\": {{ JSON.stringify($json.fromNumber) }},\n  \"state\": {{ JSON.stringify($json.state) }},\n  \"updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "name": "Supabase: Save Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2464, 240],
+      "id": "sms-save-convo-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/sms_messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Prefer", "value": "return=minimal" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"conversation_id\": {{ JSON.stringify($('Build Final Response').item.json.conversationId) }},\n  \"direction\": \"inbound\",\n  \"from_number\": {{ JSON.stringify($('Build Final Response').item.json.fromNumber) }},\n  \"to_number\": {{ JSON.stringify($('Build Final Response').item.json.toNumber) }},\n  \"message_text\": {{ JSON.stringify($('Extract SMS Data').item.json.messageText) }},\n  \"created_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "name": "Supabase: Log Inbound SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2688, 160],
+      "id": "sms-log-inbound-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/sms_messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Prefer", "value": "return=minimal" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"conversation_id\": {{ JSON.stringify($('Build Final Response').item.json.conversationId) }},\n  \"direction\": \"outbound\",\n  \"from_number\": {{ JSON.stringify($('Build Final Response').item.json.toNumber) }},\n  \"to_number\": {{ JSON.stringify($('Build Final Response').item.json.fromNumber) }},\n  \"message_text\": {{ JSON.stringify($('Build Final Response').item.json.responseText) }},\n  \"created_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "name": "Supabase: Log Outbound SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2688, 320],
+      "id": "sms-log-outbound-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Pi Send SMS Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-704, 608],
+      "id": "sms-pi-trigger-001",
+      "webhookId": "send-sms"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle Pi-initiated SMS (notifications, alerts)\nconst body = $input.first().json.body || $input.first().json;\n\nconst toNumber = body.phoneNumber || body.to;\nconst messageText = body.message || body.text;\nconst fromNumber = body.from || process.env.TELNYX_PHONE_NUMBER || '+18005551234';\nconst conversationId = `sms-${toNumber.replace(/\\D/g, '')}`;\n\nreturn {\n  json: {\n    toNumber,\n    fromNumber,\n    messageText: messageText.slice(0, 160),\n    conversationId,\n    isOutbound: true\n  }\n};"
+      },
+      "name": "Prepare Pi SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 608],
+      "id": "sms-prepare-pi-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $json.fromNumber }}\",\n  \"to\": \"{{ $json.toNumber }}\",\n  \"text\": {{ JSON.stringify($json.messageText) }}\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Send Pi SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-256, 608],
+      "id": "sms-send-pi-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, messageId: $json.data?.id || 'sent' }) }}",
+        "options": {}
+      },
+      "name": "Respond to Pi SMS",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [-32, 608],
+      "id": "sms-respond-pi-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/sms_messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Prefer", "value": "return=minimal" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"conversation_id\": {{ JSON.stringify($('Prepare Pi SMS').item.json.conversationId) }},\n  \"direction\": \"outbound\",\n  \"from_number\": {{ JSON.stringify($('Prepare Pi SMS').item.json.fromNumber) }},\n  \"to_number\": {{ JSON.stringify($('Prepare Pi SMS').item.json.toNumber) }},\n  \"message_text\": {{ JSON.stringify($('Prepare Pi SMS').item.json.messageText) }},\n  \"source\": \"pi_notification\",\n  \"created_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "name": "Supabase: Log Pi SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [192, 608],
+      "id": "sms-log-pi-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telnyx SMS Webhook": {
+      "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]]
+    },
+    "Respond 200": {
+      "main": [[{ "node": "Is Inbound SMS?", "type": "main", "index": 0 }]]
+    },
+    "Is Inbound SMS?": {
+      "main": [
+        [{ "node": "Extract SMS Data", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Extract SMS Data": {
+      "main": [[{ "node": "Supabase: Get Conversation", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Get Conversation": {
+      "main": [[{ "node": "Merge Conversation State", "type": "main", "index": 0 }]]
+    },
+    "Merge Conversation State": {
+      "main": [[{ "node": "Build Claude Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Claude Prompt": {
+      "main": [[{ "node": "Claude: Generate Response", "type": "main", "index": 0 }]]
+    },
+    "Claude: Generate Response": {
+      "main": [[{ "node": "Parse Response", "type": "main", "index": 0 }]]
+    },
+    "Parse Response": {
+      "main": [[{ "node": "Needs Pi Action?", "type": "main", "index": 0 }]]
+    },
+    "Needs Pi Action?": {
+      "main": [
+        [{ "node": "Route Intent", "type": "main", "index": 0 }],
+        [{ "node": "Build Final Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Route Intent": {
+      "main": [
+        [{ "node": "Pi: Create Session", "type": "main", "index": 0 }],
+        [{ "node": "Pi: List Sessions", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Check Status", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Send Message", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Stop Session", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Get Errors", "type": "main", "index": 0 }],
+        [{ "node": "Build Final Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pi: Create Session": {
+      "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: List Sessions": {
+      "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Check Status": {
+      "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Send Message": {
+      "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Stop Session": {
+      "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Get Errors": {
+      "main": [[{ "node": "Build Final Response", "type": "main", "index": 0 }]]
+    },
+    "Build Final Response": {
+      "main": [[{ "node": "Telnyx: Send SMS", "type": "main", "index": 0 }]]
+    },
+    "Telnyx: Send SMS": {
+      "main": [[{ "node": "Supabase: Save Conversation", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Save Conversation": {
+      "main": [[
+        { "node": "Supabase: Log Inbound SMS", "type": "main", "index": 0 },
+        { "node": "Supabase: Log Outbound SMS", "type": "main", "index": 0 }
+      ]]
+    },
+    "Pi Send SMS Webhook": {
+      "main": [[{ "node": "Prepare Pi SMS", "type": "main", "index": 0 }]]
+    },
+    "Prepare Pi SMS": {
+      "main": [[{ "node": "Telnyx: Send Pi SMS", "type": "main", "index": 0 }]]
+    },
+    "Telnyx: Send Pi SMS": {
+      "main": [[{ "node": "Respond to Pi SMS", "type": "main", "index": 0 }]]
+    },
+    "Respond to Pi SMS": {
+      "main": [[{ "node": "Supabase: Log Pi SMS", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

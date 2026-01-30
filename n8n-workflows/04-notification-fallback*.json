@@ -1,0 +1,574 @@
+{
+  "name": "04 - Notification Fallback",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notify",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Notification Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-704, 304],
+      "id": "notify-webhook-001",
+      "webhookId": "notify"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse notification request and determine priority/channels\nconst body = $input.first().json.body || $input.first().json;\n\nconst notification = {\n  id: body.id || `notif-${Date.now()}`,\n  type: body.type || 'info',  // error, question, alert, info\n  urgency: body.urgency || 'normal',  // critical, high, normal, low\n  title: body.title || 'Notification',\n  message: body.message || '',\n  sessionName: body.sessionName || null,\n  attentionItems: body.attentionItems || [],\n  phoneNumber: body.phoneNumber || '+13055551234',\n  email: body.email || null,\n  preferredChannel: body.preferredChannel || 'auto',  // call, sms, email, push, auto\n  createdAt: new Date().toISOString(),\n  attempts: []\n};\n\n// Determine channel order based on urgency\nlet channelOrder;\nswitch (notification.urgency) {\n  case 'critical':\n    channelOrder = ['call', 'sms', 'email'];\n    break;\n  case 'high':\n    channelOrder = ['call', 'sms', 'email'];\n    break;\n  case 'normal':\n    channelOrder = ['sms', 'email'];\n    break;\n  case 'low':\n    channelOrder = ['email', 'sms'];\n    break;\n  default:\n    channelOrder = ['sms', 'email'];\n}\n\n// Override if preferred channel specified\nif (notification.preferredChannel !== 'auto') {\n  channelOrder = [notification.preferredChannel, ...channelOrder.filter(c => c !== notification.preferredChannel)];\n}\n\nreturn {\n  json: {\n    notification,\n    channelOrder,\n    currentChannelIndex: 0,\n    currentChannel: channelOrder[0]\n  }\n};"
+      },
+      "name": "Parse Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-480, 304],
+      "id": "notify-parse-001"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, notificationId: $json.notification.id, channel: $json.currentChannel }) }}",
+        "options": {}
+      },
+      "name": "Respond Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [-256, 304],
+      "id": "notify-respond-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/notifications",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Prefer", "value": "return=minimal" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"notification_id\": {{ JSON.stringify($json.notification.id) }},\n  \"type\": {{ JSON.stringify($json.notification.type) }},\n  \"urgency\": {{ JSON.stringify($json.notification.urgency) }},\n  \"title\": {{ JSON.stringify($json.notification.title) }},\n  \"message\": {{ JSON.stringify($json.notification.message) }},\n  \"session_name\": {{ JSON.stringify($json.notification.sessionName) }},\n  \"phone_number\": {{ JSON.stringify($json.notification.phoneNumber) }},\n  \"channel_order\": {{ JSON.stringify($json.channelOrder) }},\n  \"status\": \"pending\",\n  \"created_at\": {{ JSON.stringify($json.notification.createdAt) }}\n}",
+        "options": {}
+      },
+      "name": "Supabase: Log Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-32, 304],
+      "id": "notify-log-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.currentChannel }}",
+                    "rightValue": "call",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.currentChannel }}",
+                    "rightValue": "sms",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.currentChannel }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [192, 304],
+      "id": "notify-route-channel-001",
+      "name": "Route by Channel"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'https://firsthealthenrollment.app.n8n.cloud' }}/webhook/initiate-outbound-call",
+        "authentication": "noAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phoneNumber\": {{ JSON.stringify($json.notification.phoneNumber) }},\n  \"urgency\": {{ JSON.stringify($json.notification.urgency) }},\n  \"attentionItems\": [\n    {\n      \"type\": {{ JSON.stringify($json.notification.type) }},\n      \"sessionName\": {{ JSON.stringify($json.notification.sessionName) }},\n      \"content\": {{ JSON.stringify($json.notification.message) }},\n      \"preview\": {{ JSON.stringify($json.notification.title) }}\n    }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Trigger Outbound Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [416, 144],
+      "id": "notify-call-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.TELNYX_PHONE_NUMBER || '+18005551234' }}\",\n  \"to\": \"{{ $json.notification.phoneNumber }}\",\n  \"text\": {{ JSON.stringify(($json.notification.urgency === 'critical' ? '🚨 ' : $json.notification.urgency === 'high' ? '⚠️ ' : '') + $json.notification.title + ': ' + $json.notification.message.slice(0, 120)) }}\n}",
+        "options": {}
+      },
+      "name": "Send SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [416, 304],
+      "id": "notify-sms-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"personalizations\": [\n    {\n      \"to\": [\n        {\n          \"email\": {{ JSON.stringify($json.notification.email || 'enzo@firsthealthenrollment.com') }}\n        }\n      ],\n      \"subject\": {{ JSON.stringify(($json.notification.urgency === 'critical' ? '[CRITICAL] ' : $json.notification.urgency === 'high' ? '[HIGH] ' : '') + 'Claude Pi: ' + $json.notification.title) }}\n    }\n  ],\n  \"from\": {\n    \"email\": \"claude-pi@firsthealthenrollment.com\",\n    \"name\": \"Claude Pi\"\n  },\n  \"content\": [\n    {\n      \"type\": \"text/html\",\n      \"value\": {{ JSON.stringify('<h2>' + $json.notification.title + '</h2><p>' + $json.notification.message + '</p>' + ($json.notification.sessionName ? '<p><strong>Session:</strong> ' + $json.notification.sessionName + '</p>' : '') + '<hr><p style=\"color: #666; font-size: 12px;\">Urgency: ' + $json.notification.urgency + ' | Type: ' + $json.notification.type + '</p>') }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "name": "Send Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [416, 464],
+      "id": "notify-email-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "sendgrid-api-key",
+          "name": "SendGrid API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check delivery result and determine if fallback needed\nconst parseData = $('Parse Notification').first().json;\nconst deliveryResult = $input.first().json;\n\nlet success = false;\nlet errorMessage = null;\n\n// Check based on channel type\nconst channel = parseData.currentChannel;\n\nswitch (channel) {\n  case 'call':\n    success = deliveryResult.success === true || deliveryResult.data?.call_control_id;\n    errorMessage = deliveryResult.error || deliveryResult.message;\n    break;\n  case 'sms':\n    success = deliveryResult.data?.id || deliveryResult.id;\n    errorMessage = deliveryResult.errors?.[0]?.detail;\n    break;\n  case 'email':\n    // SendGrid returns empty body on success (202)\n    success = !deliveryResult.errors;\n    errorMessage = deliveryResult.errors?.[0]?.message;\n    break;\n}\n\nconst attempt = {\n  channel,\n  success,\n  timestamp: new Date().toISOString(),\n  error: errorMessage\n};\n\nconst notification = { ...parseData.notification };\nnotification.attempts.push(attempt);\n\nconst nextChannelIndex = parseData.currentChannelIndex + 1;\nconst hasMoreChannels = nextChannelIndex < parseData.channelOrder.length;\nconst needsFallback = !success && hasMoreChannels;\n\nreturn {\n  json: {\n    notification,\n    channelOrder: parseData.channelOrder,\n    currentChannelIndex: nextChannelIndex,\n    currentChannel: needsFallback ? parseData.channelOrder[nextChannelIndex] : null,\n    lastAttempt: attempt,\n    success,\n    needsFallback,\n    finalStatus: success ? 'delivered' : (hasMoreChannels ? 'retrying' : 'failed')\n  }\n};"
+      },
+      "name": "Check Delivery Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 304],
+      "id": "notify-check-001"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsFallback }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "Needs Fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [864, 304],
+      "id": "notify-needs-fallback-001"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.currentChannel }}",
+                    "rightValue": "call",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.currentChannel }}",
+                    "rightValue": "sms",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.currentChannel }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [1088, 144],
+      "id": "notify-fallback-route-001",
+      "name": "Fallback Channel"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_WEBHOOK_BASE_URL || 'https://firsthealthenrollment.app.n8n.cloud' }}/webhook/initiate-outbound-call",
+        "authentication": "noAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"phoneNumber\": {{ JSON.stringify($json.notification.phoneNumber) }},\n  \"urgency\": {{ JSON.stringify($json.notification.urgency) }},\n  \"attentionItems\": [\n    {\n      \"type\": {{ JSON.stringify($json.notification.type) }},\n      \"sessionName\": {{ JSON.stringify($json.notification.sessionName) }},\n      \"content\": {{ JSON.stringify($json.notification.message) }},\n      \"preview\": {{ JSON.stringify($json.notification.title) }}\n    }\n  ]\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Fallback: Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1312, -16],
+      "id": "notify-fallback-call-001"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telnyx.com/v2/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"from\": \"{{ $env.TELNYX_PHONE_NUMBER || '+18005551234' }}\",\n  \"to\": \"{{ $json.notification.phoneNumber }}\",\n  \"text\": {{ JSON.stringify(($json.notification.urgency === 'critical' ? '🚨 ' : $json.notification.urgency === 'high' ? '⚠️ ' : '') + $json.notification.title + ': ' + $json.notification.message.slice(0, 120)) }}\n}",
+        "options": {}
+      },
+      "name": "Fallback: SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1312, 144],
+      "id": "notify-fallback-sms-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"personalizations\": [\n    {\n      \"to\": [\n        {\n          \"email\": {{ JSON.stringify($json.notification.email || 'enzo@firsthealthenrollment.com') }}\n        }\n      ],\n      \"subject\": {{ JSON.stringify('[FALLBACK] Claude Pi: ' + $json.notification.title) }}\n    }\n  ],\n  \"from\": {\n    \"email\": \"claude-pi@firsthealthenrollment.com\",\n    \"name\": \"Claude Pi\"\n  },\n  \"content\": [\n    {\n      \"type\": \"text/html\",\n      \"value\": {{ JSON.stringify('<p style=\"color: orange;\">⚠️ This is a fallback notification - primary channels failed.</p><h2>' + $json.notification.title + '</h2><p>' + $json.notification.message + '</p>' + ($json.notification.sessionName ? '<p><strong>Session:</strong> ' + $json.notification.sessionName + '</p>' : '')) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "name": "Fallback: Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1312, 304],
+      "id": "notify-fallback-email-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "sendgrid-api-key",
+          "name": "SendGrid API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check fallback delivery result\nconst checkData = $('Check Delivery Result').first().json;\nconst deliveryResult = $input.first().json;\n\nlet success = false;\nconst channel = checkData.currentChannel;\n\nswitch (channel) {\n  case 'call':\n    success = deliveryResult.success === true || deliveryResult.data?.call_control_id;\n    break;\n  case 'sms':\n    success = deliveryResult.data?.id || deliveryResult.id;\n    break;\n  case 'email':\n    success = !deliveryResult.errors;\n    break;\n}\n\nconst attempt = {\n  channel,\n  success,\n  timestamp: new Date().toISOString(),\n  isFallback: true\n};\n\nconst notification = { ...checkData.notification };\nnotification.attempts.push(attempt);\n\nreturn {\n  json: {\n    notification,\n    lastAttempt: attempt,\n    success,\n    finalStatus: success ? 'delivered_fallback' : 'failed'\n  }\n};"
+      },
+      "name": "Check Fallback Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1536, 144],
+      "id": "notify-check-fallback-001"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/notifications?notification_id=eq.{{ $json.notification.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": {{ JSON.stringify($json.finalStatus) }},\n  \"attempts\": {{ JSON.stringify($json.notification.attempts) }},\n  \"delivered_at\": {{ $json.success ? JSON.stringify(new Date().toISOString()) : 'null' }}\n}",
+        "options": {}
+      },
+      "name": "Supabase: Update Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1088, 464],
+      "id": "notify-update-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/notifications?notification_id=eq.{{ $json.notification.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": {{ JSON.stringify($json.finalStatus) }},\n  \"attempts\": {{ JSON.stringify($json.notification.attempts) }},\n  \"delivered_at\": {{ $json.success ? JSON.stringify(new Date().toISOString()) : 'null' }}\n}",
+        "options": {}
+      },
+      "name": "Supabase: Update Fallback Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1760, 144],
+      "id": "notify-update-fallback-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notification-status",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Status Check Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-704, 608],
+      "id": "notify-status-webhook-001",
+      "webhookId": "notification-status"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/notifications?notification_id=eq.{{ $json.body.notificationId || $json.notificationId }}&select=*",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Supabase: Get Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-480, 608],
+      "id": "notify-get-status-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "notification-history",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "History Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-704, 768],
+      "id": "notify-history-webhook-001",
+      "webhookId": "notification-history"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/notifications?order=created_at.desc&limit={{ $json.query.limit || 20 }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Supabase: Get History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [-480, 768],
+      "id": "notify-get-history-001",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Notification Webhook": {
+      "main": [[{ "node": "Parse Notification", "type": "main", "index": 0 }]]
+    },
+    "Parse Notification": {
+      "main": [[{ "node": "Respond Accepted", "type": "main", "index": 0 }]]
+    },
+    "Respond Accepted": {
+      "main": [[{ "node": "Supabase: Log Notification", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Log Notification": {
+      "main": [[{ "node": "Route by Channel", "type": "main", "index": 0 }]]
+    },
+    "Route by Channel": {
+      "main": [
+        [{ "node": "Trigger Outbound Call", "type": "main", "index": 0 }],
+        [{ "node": "Send SMS", "type": "main", "index": 0 }],
+        [{ "node": "Send Email", "type": "main", "index": 0 }],
+        [{ "node": "Send SMS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Trigger Outbound Call": {
+      "main": [[{ "node": "Check Delivery Result", "type": "main", "index": 0 }]]
+    },
+    "Send SMS": {
+      "main": [[{ "node": "Check Delivery Result", "type": "main", "index": 0 }]]
+    },
+    "Send Email": {
+      "main": [[{ "node": "Check Delivery Result", "type": "main", "index": 0 }]]
+    },
+    "Check Delivery Result": {
+      "main": [[{ "node": "Needs Fallback?", "type": "main", "index": 0 }]]
+    },
+    "Needs Fallback?": {
+      "main": [
+        [{ "node": "Fallback Channel", "type": "main", "index": 0 }],
+        [{ "node": "Supabase: Update Status", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fallback Channel": {
+      "main": [
+        [{ "node": "Fallback: Call", "type": "main", "index": 0 }],
+        [{ "node": "Fallback: SMS", "type": "main", "index": 0 }],
+        [{ "node": "Fallback: Email", "type": "main", "index": 0 }],
+        [{ "node": "Fallback: SMS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fallback: Call": {
+      "main": [[{ "node": "Check Fallback Result", "type": "main", "index": 0 }]]
+    },
+    "Fallback: SMS": {
+      "main": [[{ "node": "Check Fallback Result", "type": "main", "index": 0 }]]
+    },
+    "Fallback: Email": {
+      "main": [[{ "node": "Check Fallback Result", "type": "main", "index": 0 }]]
+    },
+    "Check Fallback Result": {
+      "main": [[{ "node": "Supabase: Update Fallback Status", "type": "main", "index": 0 }]]
+    },
+    "Status Check Webhook": {
+      "main": [[{ "node": "Supabase: Get Notification", "type": "main", "index": 0 }]]
+    },
+    "History Webhook": {
+      "main": [[{ "node": "Supabase: Get History", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

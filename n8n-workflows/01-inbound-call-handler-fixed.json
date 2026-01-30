@@ -1,0 +1,1201 @@
+{
+  "name": "01 - Inbound Call Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telnyx-voice",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Telnyx Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-704, 304],
+      "id": "225f1c71-05a7-4bc5-8c30-4aae14ed7fea",
+      "webhookId": "d2a9eaf0-2f11-4baa-925c-39056ddca7ca"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={}",
+        "options": {}
+      },
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [-480, 304],
+      "id": "d0b3062d-8d8a-45fe-9ea0-733169745815"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.event_type }}",
+                    "rightValue": "call.initiated",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.event_type }}",
+                    "rightValue": "call.answered",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.event_type }}",
+                    "rightValue": "call.gather.ended",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.event_type }}",
+                    "rightValue": "call.playback.ended",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.data.event_type }}",
+                    "rightValue": "call.hangup",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [-272, 304],
+      "id": "4599564f-5bfc-4560-a012-8d4e474dabec",
+      "name": "Route Event Type"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $json.data.payload.call_control_id }}/actions/answer",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"client_state\": \"{{ Buffer.from(JSON.stringify({history:[],lastIntent:null,sessionContext:{},turnCount:0,consecutiveTimeouts:0})).toString('base64') }}\"\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Answer Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [208, 0],
+      "id": "54de69e8-e095-4856-b723-408c7a5c0a42",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/attention",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Check Attention Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [208, 208],
+      "id": "47e08a05-7607-4e5b-94ea-3d978d7c37ef",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build greeting text based on pending attention items\nconst attentionData = $input.first().json;\nconst items = attentionData.items || [];\nconst pendingCount = items.filter(i => !i.resolvedAt).length;\n\nlet greeting;\nif (pendingCount > 0) {\n  greeting = `Hey! I've got ${pendingCount} thing${pendingCount > 1 ? 's' : ''} waiting for you. Want to handle those first, or start something new?`;\n} else {\n  greeting = \"Hey! What would you like to work on?\";\n}\n\nconst webhookData = $('Telnyx Voice Webhook').first().json;\nconst callControlId = webhookData.data.payload.call_control_id;\n\nconst state = {\n  history: [],\n  lastIntent: null,\n  sessionContext: {},\n  turnCount: 0,\n  consecutiveTimeouts: 0,\n  pendingAttentionCount: pendingCount\n};\n\nreturn {\n  json: {\n    greeting,\n    callControlId,\n    clientState: Buffer.from(JSON.stringify(state)).toString('base64'),\n    pendingCount\n  }\n};"
+      },
+      "name": "Build Greeting",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [432, 208],
+      "id": "a4f35fc0-0a4f-445f-8ba8-24856f80d124"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/3sfGn775ryaDXhFWHwBg",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.greeting) }},\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": {\n    \"stability\": 0.5,\n    \"similarity_boost\": 0.75\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audioData"
+            }
+          }
+        }
+      },
+      "name": "ElevenLabs: Greeting TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [656, 208],
+      "id": "cfdc6086-e53b-495c-ad1a-2c4f7fdf4506",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IZ3R2jRKwMqMUzY4",
+          "name": "ElevenLabs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/tts-audio/{{ $('Build Greeting').item.json.callControlId }}-greeting.mp3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "audio/mpeg"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audioData",
+        "options": {}
+      },
+      "name": "Supabase: Upload Greeting Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 208],
+      "id": "8ab47709-448d-4f7c-ae7f-63e60313b5d8",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Build Greeting').item.json.callControlId }}/actions/playback_start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"audio_url\": \"https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/public/tts-audio/{{ $('Build Greeting').item.json.callControlId }}-greeting.mp3\",\n  \"client_state\": \"{{ $('Build Greeting').item.json.clientState }}\"\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Play Greeting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1088, 208],
+      "id": "b777bd21-cd55-4bac-8a7b-8b2ec2e13727",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $json.data.payload.call_control_id }}/actions/gather",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"type\": \"speech\",\n  \"language\": \"en-US\",\n  \"speech_model\": \"default\",\n  \"end_silence_timeout_millis\": 1500,\n  \"timeout_millis\": 15000,\n  \"client_state\": \"{{ $json.data.payload.client_state }}\"\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Gather Speech",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [0, 736],
+      "id": "0655afba-0433-4f51-ab92-668755b0fd9a",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract state and transcript from gather.ended event\nconst webhookData = $('Telnyx Voice Webhook').first().json;\nconst payload = webhookData.data.payload;\n\nlet state;\ntry {\n  const decoded = Buffer.from(payload.client_state || '', 'base64').toString('utf-8');\n  state = JSON.parse(decoded);\n} catch (e) {\n  state = { history: [], lastIntent: null, sessionContext: {}, turnCount: 0, consecutiveTimeouts: 0 };\n}\n\nconst transcript = payload.speech?.transcript || '';\nconst speechConfidence = payload.speech?.confidence || 0;\nconst timedOut = !transcript || transcript.trim() === '';\n\nif (!timedOut) {\n  state.history.push({ role: 'user', content: transcript });\n  state.consecutiveTimeouts = 0;\n}\n\nif (state.history.length > 10) {\n  state.history = state.history.slice(-10);\n}\n\nstate.turnCount++;\n\nreturn {\n  json: {\n    callControlId: payload.call_control_id,\n    transcript,\n    speechConfidence,\n    timedOut,\n    state,\n    turnCount: state.turnCount\n  }\n};"
+      },
+      "name": "Extract State & Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [208, 608],
+      "id": "b7560437-faa2-45f6-bfdf-290caee93544"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.timedOut }}"
+            }
+          ]
+        }
+      },
+      "name": "Has Speech?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [432, 544],
+      "id": "82f984be-1453-49ec-82a7-dc666da54c06"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle timeout\nconst state = { ...$json.state };\nconst timeoutCount = (state.consecutiveTimeouts || 0) + 1;\nstate.consecutiveTimeouts = timeoutCount;\n\nlet responseText;\nlet shouldHangup = false;\n\nif (timeoutCount >= 2) {\n  responseText = \"I'll let you go for now. Call back when you're ready!\";\n  shouldHangup = true;\n} else {\n  responseText = \"Still there? I didn't hear anything.\";\n}\n\nconst audioTimestamp = Date.now();\n\nreturn {\n  json: {\n    callControlId: $json.callControlId,\n    responseText,\n    shouldHangup,\n    state,\n    clientState: Buffer.from(JSON.stringify(state)).toString('base64'),\n    audioTimestamp,\n    intent: 'timeout'\n  }\n};"
+      },
+      "name": "Handle Timeout",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [656, 800],
+      "id": "f4c3b363-6aab-442e-aedf-296c4aeb8553"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Claude intent classification prompt\nconst { transcript, state } = $json;\n\nconst historyText = state.history\n  .map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`)\n  .join('\\n');\n\nconst systemPrompt = `You are an intent classifier for a voice assistant that manages Claude Code sessions on a Raspberry Pi.\n\nClassify the user's speech into ONE of these intents:\n- create_session: User wants to start a new coding project/session\n- list_sessions: User wants to see what sessions are running\n- check_status: User wants status of a specific session\n- send_message: User wants to send a message/instruction to a running session\n- stop_session: User wants to pause/interrupt a session (Ctrl+C)\n- kill_session: User wants to terminate/shut down a session completely\n- resume_session: User wants to resume a preserved/stopped session\n- get_errors: User wants to check for errors or attention items\n- end_call: User wants to end the phone call\n- unknown: Cannot determine intent\n\nExtract these fields if present:\n- sessionName: Which project/session name is referenced (null if not mentioned)\n- message: The actual content/instruction to send to Claude (null if not applicable)\n\nRespond with ONLY valid JSON:\n{\"intent\": \"...\", \"sessionName\": \"...\", \"message\": \"...\", \"confidence\": 0.0-1.0}`;\n\nconst userMessage = historyText\n  ? `Conversation so far:\\n${historyText}\\n\\nUser just said: \"${transcript}\"\\n\\nClassify the intent.`\n  : `User said: \"${transcript}\"\\n\\nClassify the intent.`;\n\nreturn {\n  json: {\n    systemPrompt,\n    userMessage,\n    callControlId: $json.callControlId,\n    transcript,\n    state\n  }\n};"
+      },
+      "name": "Build Intent Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [656, 544],
+      "id": "b5f00566-bbc6-4524-a1a3-c75f1850fc2b"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-3-5-haiku-latest\",\n  \"max_tokens\": 200,\n  \"system\": {{ JSON.stringify($json.systemPrompt) }},\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.userMessage) }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "name": "Claude: Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 544],
+      "id": "c6c62f52-dffd-407b-9f18-b9b2472e4d62",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "njP19bKzhe25PSeR",
+          "name": "Claude PI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's intent classification response\nconst claudeResponse = $input.first().json;\nconst prevData = $('Build Intent Prompt').first().json;\n\nlet intentData;\ntry {\n  const text = claudeResponse.content[0].text;\n  let jsonStr = text;\n  const jsonMatch = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/) || text.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    jsonStr = jsonMatch[1] || jsonMatch[0];\n  }\n  intentData = JSON.parse(jsonStr.trim());\n} catch (e) {\n  intentData = { intent: 'unknown', sessionName: null, message: null, confidence: 0 };\n}\n\nreturn {\n  json: {\n    intent: intentData.intent || 'unknown',\n    sessionName: intentData.sessionName || null,\n    message: intentData.message || prevData.transcript,\n    confidence: intentData.confidence || 0,\n    callControlId: prevData.callControlId,\n    transcript: prevData.transcript,\n    state: prevData.state\n  }\n};"
+      },
+      "name": "Parse Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1088, 544],
+      "id": "3f8e035c-7b6a-46b6-bd0e-6876970fdb79"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "create_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "list_sessions",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "check_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "send_message",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "stop_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "kill_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "resume_session",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "get_errors",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "end_call",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [1312, 544],
+      "id": "ed37240d-4ae6-40d9-9d25-9dc8af0f8f4e",
+      "name": "Route Intent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"name\": {{ JSON.stringify($('Parse Intent').item.json.sessionName || 'new-project') }},\n  \"initialPrompt\": {{ JSON.stringify($('Parse Intent').item.json.message || '') }}\n}",
+        "options": {}
+      },
+      "name": "Pi: Create Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 112],
+      "id": "055eb73b-136e-4491-96f8-8469a826cd76",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: List Sessions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 272],
+      "id": "e7e50d89-1f1d-4d87-97c7-650c56c20f4a",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://localhost:3000/sessions/{{ $('Parse Intent').item.json.state.sessionContext.sessionId || $('Parse Intent').item.json.sessionName || 'unknown' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Check Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 432],
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/sessions/{{ $('Parse Intent').item.json.state.sessionContext.sessionId || $('Parse Intent').item.json.sessionName || 'unknown' }}/send",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {{ JSON.stringify($('Parse Intent').item.json.message || $('Parse Intent').item.json.transcript) }}\n}",
+        "options": {}
+      },
+      "name": "Pi: Send Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 592],
+      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/sessions/{{ $('Parse Intent').item.json.state.sessionContext.sessionId || $('Parse Intent').item.json.sessionName || 'unknown' }}/stop",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Stop Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 752],
+      "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/sessions/{{ $('Parse Intent').item.json.state.sessionContext.sessionId || $('Parse Intent').item.json.sessionName || 'unknown' }}/kill",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Kill Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 912],
+      "id": "d4e5f6a7-b8c9-0123-defa-456789012345",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:3000/sessions/{{ $('Parse Intent').item.json.state.sessionContext.sessionId || $('Parse Intent').item.json.sessionName || 'unknown' }}/resume",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Resume Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 1072],
+      "id": "e5f6a7b8-c9d0-1234-efab-567890123456",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/attention",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Pi: Get Attention Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1616, 1232],
+      "id": "f6a7b8c9-d0e1-2345-fabc-678901234567",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RP3r2ToN525GxDzC",
+          "name": "Pi Service API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build response text based on intent and Pi API response\nconst intentData = $('Parse Intent').first().json;\nconst piResponse = $input.first().json;\nconst intent = intentData.intent;\n\nlet responseText = '';\nlet updatedSessionContext = { ...intentData.state.sessionContext };\n\nswitch (intent) {\n  case 'create_session': {\n    if (piResponse.session) {\n      updatedSessionContext = { sessionId: piResponse.session.id, sessionName: piResponse.session.name };\n      responseText = intentData.message\n        ? `${piResponse.session.name} is running and I've sent over your instructions. Claude's on it.`\n        : `Got it, ${piResponse.session.name} is up and running. What should Claude work on first?`;\n    } else {\n      const errorMsg = piResponse.error || piResponse.message || '';\n      responseText = errorMsg.toLowerCase().includes('exists')\n        ? `There's already a session called ${intentData.sessionName}. Want me to use that one?`\n        : `Sorry, I couldn't create that session. ${errorMsg || 'Something went wrong.'}`;\n    }\n    break;\n  }\n  case 'list_sessions': {\n    const sessions = piResponse.sessions || piResponse || [];\n    const sessionList = Array.isArray(sessions) ? sessions : [];\n    if (sessionList.length === 0) {\n      responseText = \"No sessions running right now. Want to start one?\";\n    } else {\n      const statusMap = { running: 'actively working', idle: 'idle', error: 'has errors', waiting_input: 'waiting for input', preserved: 'preserved' };\n      const descriptions = sessionList.map(s => `${s.name} is ${statusMap[s.status] || s.status}`).join('. ');\n      responseText = `You've got ${sessionList.length} session${sessionList.length > 1 ? 's' : ''} running. ${descriptions}.`;\n      if (sessionList.length === 1) updatedSessionContext = { sessionId: sessionList[0].id, sessionName: sessionList[0].name };\n    }\n    break;\n  }\n  case 'check_status': {\n    const session = piResponse.session || piResponse;\n    responseText = (session && session.name)\n      ? `${session.name} is ${session.status}.${session.lastOutputPreview ? ' Latest: ' + session.lastOutputPreview.slice(0, 100) : ''}`\n      : \"I couldn't find that session. Want me to list what's running?\";\n    break;\n  }\n  case 'send_message':\n    responseText = piResponse.success !== false\n      ? `Done, I've passed that along to ${intentData.state.sessionContext.sessionName || 'the session'}.`\n      : `Something went wrong sending that. ${piResponse.error || ''}`;\n    break;\n  case 'stop_session':\n    responseText = piResponse.success !== false\n      ? `Done, I've interrupted ${intentData.state.sessionContext.sessionName || 'the session'}.`\n      : `I couldn't stop that session. ${piResponse.error || ''}`;\n    break;\n  case 'kill_session':\n    responseText = piResponse.success !== false\n      ? `Got it, ${intentData.state.sessionContext.sessionName || 'the session'} is shut down.`\n      : `I couldn't kill that session. ${piResponse.error || ''}`;\n    if (piResponse.success !== false) updatedSessionContext = {};\n    break;\n  case 'resume_session':\n    responseText = piResponse.success !== false\n      ? `${intentData.state.sessionContext.sessionName || 'The session'} is back up.`\n      : `I couldn't resume that session. ${piResponse.error || ''}`;\n    break;\n  case 'get_errors': {\n    const items = piResponse.items || piResponse || [];\n    const itemList = Array.isArray(items) ? items : [];\n    const unresolved = itemList.filter(i => !i.resolvedAt);\n    responseText = unresolved.length === 0\n      ? \"No errors or pending items. Everything looks good!\"\n      : `You've got ${unresolved.length} item${unresolved.length > 1 ? 's' : ''} needing attention.`;\n    break;\n  }\n  default:\n    responseText = \"Sorry, I didn't quite catch that. Could you say it again?\";\n}\n\nconst updatedState = { ...intentData.state, lastIntent: intent, sessionContext: updatedSessionContext, consecutiveTimeouts: 0 };\nupdatedState.history.push({ role: 'assistant', content: responseText });\n\nreturn {\n  json: {\n    responseText,\n    callControlId: intentData.callControlId,\n    state: updatedState,\n    clientState: Buffer.from(JSON.stringify(updatedState)).toString('base64'),\n    intent,\n    audioTimestamp: Date.now()\n  }\n};"
+      },
+      "name": "Build Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 544],
+      "id": "a1234567-b890-cdef-1234-567890abcdef"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/3sfGn775ryaDXhFWHwBg",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.responseText) }},\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": { \"stability\": 0.5, \"similarity_boost\": 0.75 }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audioData"
+            }
+          }
+        }
+      },
+      "name": "ElevenLabs: Response TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2144, 544],
+      "id": "b2345678-c901-def2-3456-7890abcdef12",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IZ3R2jRKwMqMUzY4",
+          "name": "ElevenLabs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/tts-audio/{{ $('Build Response').item.json.callControlId }}-{{ $('Build Response').item.json.audioTimestamp }}.mp3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "audio/mpeg" }] },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audioData",
+        "options": {}
+      },
+      "name": "Supabase: Upload Response Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2368, 544],
+      "id": "c3456789-d012-ef34-5678-90abcdef1234",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Build Response').item.json.callControlId }}/actions/playback_start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"audio_url\": \"https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/public/tts-audio/{{ $('Build Response').item.json.callControlId }}-{{ $('Build Response').item.json.audioTimestamp }}.mp3\",\n  \"client_state\": \"{{ $('Build Response').item.json.clientState }}\"\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Play Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2592, 544],
+      "id": "d4567890-e123-f456-7890-abcdef123456",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/3sfGn775ryaDXhFWHwBg",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.responseText) }},\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": { \"stability\": 0.5, \"similarity_boost\": 0.75 }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audioData"
+            }
+          }
+        }
+      },
+      "name": "ElevenLabs: Timeout TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 800],
+      "id": "e5678901-f234-5678-9012-bcdef1234567",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IZ3R2jRKwMqMUzY4",
+          "name": "ElevenLabs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/tts-audio/{{ $('Handle Timeout').item.json.callControlId }}-{{ $('Handle Timeout').item.json.audioTimestamp }}.mp3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "audio/mpeg" }] },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audioData",
+        "options": {}
+      },
+      "name": "Supabase: Upload Timeout Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1104, 800],
+      "id": "f6789012-0345-6789-0123-cdef12345678",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Handle Timeout').item.json.callControlId }}/actions/playback_start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"audio_url\": \"https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/public/tts-audio/{{ $('Handle Timeout').item.json.callControlId }}-{{ $('Handle Timeout').item.json.audioTimestamp }}.mp3\",\n  \"client_state\": \"{{ $('Handle Timeout').item.json.clientState }}\"\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Play Timeout Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1328, 800],
+      "id": "07890123-1456-7890-1234-def123456789",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build goodbye TTS text\nconst intentData = $('Parse Intent').first().json;\nconst state = intentData.state;\nconst hasActiveSessions = state.sessionContext && state.sessionContext.sessionId;\n\nconst responseText = hasActiveSessions\n  ? \"Alright, Claude's on it. I'll call if anything else comes up!\"\n  : \"Talk soon!\";\n\nreturn {\n  json: {\n    responseText,\n    callControlId: intentData.callControlId,\n    state,\n    clientState: Buffer.from(JSON.stringify(state)).toString('base64'),\n    audioTimestamp: Date.now()\n  }\n};"
+      },
+      "name": "Build Goodbye",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1616, 1392],
+      "id": "18901234-2567-8901-2345-ef1234567890"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/text-to-speech/3sfGn775ryaDXhFWHwBg",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.responseText) }},\n  \"model_id\": \"eleven_turbo_v2_5\",\n  \"voice_settings\": { \"stability\": 0.5, \"similarity_boost\": 0.75 }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audioData"
+            }
+          }
+        }
+      },
+      "name": "ElevenLabs: Goodbye TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1840, 1392],
+      "id": "29012345-3678-9012-3456-f01234567890",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IZ3R2jRKwMqMUzY4",
+          "name": "ElevenLabs"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/tts-audio/{{ $('Build Goodbye').item.json.callControlId }}-goodbye.mp3",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "audio/mpeg" }] },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audioData",
+        "options": {}
+      },
+      "name": "Supabase: Upload Goodbye Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2064, 1392],
+      "id": "30123456-4789-0123-4567-012345678901",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Build Goodbye').item.json.callControlId }}/actions/playback_start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"audio_url\": \"https://msqhstkdltiabqntjyqh.supabase.co/storage/v1/object/public/tts-audio/{{ $('Build Goodbye').item.json.callControlId }}-goodbye.mp3\",\n  \"client_state\": \"{{ $('Build Goodbye').item.json.clientState }}\"\n}",
+        "options": {}
+      },
+      "name": "Telnyx: Play Goodbye",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2288, 1392],
+      "id": "41234567-5890-1234-5678-123456789012",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telnyx.com/v2/calls/{{ $('Build Goodbye').item.json.callControlId }}/actions/hangup",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {}
+      },
+      "name": "Telnyx: Hangup After Goodbye",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2512, 1392],
+      "id": "52345678-6901-2345-6789-234567890123",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qdih1e8XbbfLh7sw",
+          "name": "Telnyx API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log call on hangup\nconst webhookData = $('Telnyx Voice Webhook').first().json;\nconst payload = webhookData.data?.payload || {};\n\nreturn {\n  json: {\n    direction: 'inbound',\n    telnyx_call_control_id: payload.call_control_id || null,\n    telnyx_call_leg_id: payload.call_leg_id || null,\n    status: 'completed',\n    caller_number: payload.from || null,\n    started_at: new Date().toISOString(),\n    metadata: { hangup_cause: payload.hangup_cause || 'normal' }\n  }\n};"
+      },
+      "name": "Prepare Call Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 912],
+      "id": "63456789-7012-3456-7890-345678901234"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://msqhstkdltiabqntjyqh.supabase.co/rest/v1/calls",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Prefer", "value": "return=minimal" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "name": "Supabase: Log Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [208, 912],
+      "id": "220e82d4-ff78-4831-add0-569a85b744d3",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "SNE3zyRFD9QkBiqF",
+          "name": "Supabase Service Key Claude-Pi"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telnyx Voice Webhook": {
+      "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]]
+    },
+    "Respond 200": {
+      "main": [[{ "node": "Route Event Type", "type": "main", "index": 0 }]]
+    },
+    "Route Event Type": {
+      "main": [
+        [{ "node": "Telnyx: Answer Call", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Check Attention Queue", "type": "main", "index": 0 }],
+        [{ "node": "Extract State & Transcript", "type": "main", "index": 0 }],
+        [{ "node": "Telnyx: Gather Speech", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Call Log", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pi: Check Attention Queue": {
+      "main": [[{ "node": "Build Greeting", "type": "main", "index": 0 }]]
+    },
+    "Build Greeting": {
+      "main": [[{ "node": "ElevenLabs: Greeting TTS", "type": "main", "index": 0 }]]
+    },
+    "ElevenLabs: Greeting TTS": {
+      "main": [[{ "node": "Supabase: Upload Greeting Audio", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Upload Greeting Audio": {
+      "main": [[{ "node": "Telnyx: Play Greeting", "type": "main", "index": 0 }]]
+    },
+    "Extract State & Transcript": {
+      "main": [[{ "node": "Has Speech?", "type": "main", "index": 0 }]]
+    },
+    "Has Speech?": {
+      "main": [
+        [{ "node": "Build Intent Prompt", "type": "main", "index": 0 }],
+        [{ "node": "Handle Timeout", "type": "main", "index": 0 }]
+      ]
+    },
+    "Handle Timeout": {
+      "main": [[{ "node": "ElevenLabs: Timeout TTS", "type": "main", "index": 0 }]]
+    },
+    "ElevenLabs: Timeout TTS": {
+      "main": [[{ "node": "Supabase: Upload Timeout Audio", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Upload Timeout Audio": {
+      "main": [[{ "node": "Telnyx: Play Timeout Response", "type": "main", "index": 0 }]]
+    },
+    "Build Intent Prompt": {
+      "main": [[{ "node": "Claude: Classify Intent", "type": "main", "index": 0 }]]
+    },
+    "Claude: Classify Intent": {
+      "main": [[{ "node": "Parse Intent", "type": "main", "index": 0 }]]
+    },
+    "Parse Intent": {
+      "main": [[{ "node": "Route Intent", "type": "main", "index": 0 }]]
+    },
+    "Route Intent": {
+      "main": [
+        [{ "node": "Pi: Create Session", "type": "main", "index": 0 }],
+        [{ "node": "Pi: List Sessions", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Check Status", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Send Message", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Stop Session", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Kill Session", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Resume Session", "type": "main", "index": 0 }],
+        [{ "node": "Pi: Get Attention Queue", "type": "main", "index": 0 }],
+        [{ "node": "Build Goodbye", "type": "main", "index": 0 }],
+        [{ "node": "Build Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pi: Create Session": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: List Sessions": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Check Status": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Send Message": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Stop Session": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Kill Session": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Resume Session": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Pi: Get Attention Queue": {
+      "main": [[{ "node": "Build Response", "type": "main", "index": 0 }]]
+    },
+    "Build Response": {
+      "main": [[{ "node": "ElevenLabs: Response TTS", "type": "main", "index": 0 }]]
+    },
+    "ElevenLabs: Response TTS": {
+      "main": [[{ "node": "Supabase: Upload Response Audio", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Upload Response Audio": {
+      "main": [[{ "node": "Telnyx: Play Response", "type": "main", "index": 0 }]]
+    },
+    "Build Goodbye": {
+      "main": [[{ "node": "ElevenLabs: Goodbye TTS", "type": "main", "index": 0 }]]
+    },
+    "ElevenLabs: Goodbye TTS": {
+      "main": [[{ "node": "Supabase: Upload Goodbye Audio", "type": "main", "index": 0 }]]
+    },
+    "Supabase: Upload Goodbye Audio": {
+      "main": [[{ "node": "Telnyx: Play Goodbye", "type": "main", "index": 0 }]]
+    },
+    "Telnyx: Play Goodbye": {
+      "main": [[{ "node": "Telnyx: Hangup After Goodbye", "type": "main", "index": 0 }]]
+    },
+    "Prepare Call Log": {
+      "main": [[{ "node": "Supabase: Log Call", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
