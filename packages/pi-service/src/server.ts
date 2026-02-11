@@ -6,6 +6,7 @@ import { getConfig } from './lib/config';
 import { healthRoutes } from './routes/health';
 import { sessionRoutes } from './routes/sessions';
 import { attentionRoutes } from './routes/attention';
+import { voiceCommandRoutes } from './routes/voice-commands';
 import ttsRoutes from './routes/tts';
 
 const app = new Hono();
@@ -36,6 +37,7 @@ app.use('*', async (c, next) => {
 app.route('/health', healthRoutes);
 app.route('/sessions', sessionRoutes);
 app.route('/attention', attentionRoutes);
+app.route('/voice-commands', voiceCommandRoutes);
 app.route('/tts', ttsRoutes);
 
 // 404 handler
