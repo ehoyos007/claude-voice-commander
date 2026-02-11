@@ -6,6 +6,7 @@ import { getConfig } from './lib/config';
 import { healthRoutes } from './routes/health';
 import { sessionRoutes } from './routes/sessions';
 import { attentionRoutes } from './routes/attention';
+import ttsRoutes from './routes/tts';
 
 const app = new Hono();
 
@@ -14,10 +15,10 @@ app.use('*', logger());
 app.use('*', secureHeaders());
 app.use('*', cors());
 
-// API Key authentication middleware (skip for health check)
+// API Key authentication middleware (skip for health check and TTS audio)
 app.use('*', async (c, next) => {
-  // Allow health check without auth
-  if (c.req.path === '/health') {
+  // Allow health check and TTS audio without auth
+  if (c.req.path === '/health' || c.req.path.startsWith('/tts/audio/')) {
     return next();
   }
 
@@ -35,6 +36,7 @@ app.use('*', async (c, next) => {
 app.route('/health', healthRoutes);
 app.route('/sessions', sessionRoutes);
 app.route('/attention', attentionRoutes);
+app.route('/tts', ttsRoutes);
 
 // 404 handler
 app.notFound((c) => {

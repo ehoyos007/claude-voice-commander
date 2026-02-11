@@ -99,14 +99,26 @@ async function triggerWebhook(): Promise<void> {
     triggerReason: 'timer_expired',
   };
 
-  // TODO: Implement webhook call
-  // await fetch(config.n8nWebhookUrl, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(payload),
-  // });
+  // Call n8n webhook to initiate outbound call
+  const webhookUrl = config.n8nWebhookUrl || 'https://firsthealthenrollment.app.n8n.cloud/webhook/initiate-outbound-call';
+  
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    
+    if (!response.ok) {
+      console.error('Webhook failed:', response.status, await response.text());
+    } else {
+      console.log('Webhook triggered successfully:', await response.json());
+    }
+  } catch (error) {
+    console.error('Error triggering webhook:', error);
+  }
 
-  console.log('Would trigger webhook:', payload);
+  console.log('Triggered webhook:', payload);
 
   // Reset state after triggering
   state.firstItemAt = null;

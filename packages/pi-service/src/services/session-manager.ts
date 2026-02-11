@@ -42,10 +42,12 @@ async function resolveSession(idOrName: string): Promise<Session> {
 
 /** Build the Claude Code launch command */
 function buildClaudeCommand(config: ReturnType<typeof getConfig>, request: CreateSessionRequest): string {
-  const parts = [config.claudePath, '--dangerously-skip-permissions'];
+  // Build command for interactive mode (not -p which exits after response)
+  // Don't use --dangerously-skip-permissions to avoid the bypass mode warning
+  const parts = [config.claudePath];
   if (request.initialPrompt) {
-    // Pass initial prompt via -p flag so Claude starts working immediately
-    parts.push('-p', `"${request.initialPrompt.replace(/"/g, '\\"')}"`);
+    // Pass initial prompt as positional argument for interactive mode
+    parts.push(`"${request.initialPrompt.replace(/"/g, '\\"')}"`);
   }
   return parts.join(' ');
 }
@@ -91,7 +93,11 @@ export const sessionManager: ISessionManager = {
     // 1. Create tmux session running Claude Code
     await tmux.createSession(tmuxSessionName, claudeCmd, request.projectPath);
 
-    // 2. Set up pipe-pane for archiving output
+    // 2. Accept the trust prompt by sending Enter (Claude shows a trust dialog on first run)
+    await new Promise((r) => setTimeout(r, 2500)); // Wait for prompt to appear
+    await tmux.sendKeys(tmuxSessionName, '', false); // Send just Enter to accept
+
+    // 3. Set up pipe-pane for archiving output
     try {
       const logPath = await ensureArchiveLogPath(request.name);
       await tmux.startPipePane(tmuxSessionName, logPath);
